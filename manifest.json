@@ -1,0 +1,8 @@
+{
+  "name": "Week plan",
+  "short_name": "Week plan",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#efeae2",
+  "theme_color": "#145c4a"
+}
