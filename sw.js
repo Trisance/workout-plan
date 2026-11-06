@@ -1,9 +1,8 @@
-const CACHE = "week-plan-v3";
-const FILES = ["./", "./index.html", "./manifest.json"];
+const CACHE = "week-plan-v4";
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(FILES)));
   self.skipWaiting();
+  event.waitUntil(caches.open(CACHE));
 });
 
 self.addEventListener("activate", (event) => {
@@ -16,10 +15,13 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
+  const request = event.request.mode === "navigate"
+    ? new Request(event.request, { cache: "reload" })
+    : event.request;
   event.respondWith(
-    fetch(event.request)
+    fetch(request)
       .then((response) => {
-        if (response.ok) {
+        if (response.ok && event.request.mode !== "navigate") {
           const copy = response.clone();
           caches.open(CACHE).then((cache) => cache.put(event.request, copy));
         }

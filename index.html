@@ -99,15 +99,31 @@
       color: var(--accent-ink);
     }
 
-    .names label {
+    .names label, .guest-line {
       display: flex;
       flex-direction: column;
-      gap: 4px;
-      font-size: 12px;
-      color: var(--muted);
+      gap: 8px;
     }
 
-    .names input, .weight input {
+    .names .pick {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      gap: 8px;
+      color: var(--ink);
+      font-size: 16px;
+      font-weight: 650;
+    }
+
+    .pick input, .done-check input {
+      width: 22px;
+      height: 22px;
+      min-height: 22px;
+      padding: 0;
+      accent-color: var(--accent);
+    }
+
+    .names input:not([type="checkbox"]), .weight input {
       width: 100%;
       border: 1px solid var(--line);
       background: #fff;
@@ -137,6 +153,21 @@
       margin-top: 10px;
       box-shadow: var(--shadow);
     }
+
+    .part.is-done {
+      border-color: var(--accent);
+      background: #f3faf7;
+    }
+
+    .done-check {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      font-weight: 650;
+    }
+
+    .weights.single { grid-template-columns: 1fr; }
 
     .part-head {
       display: flex;
@@ -202,19 +233,18 @@
   <div class="wrap">
     <h1 id="title">This week</h1>
     <p class="week-of" id="week-of"></p>
-    <p class="note">Pick how many days at the gym. The week fills in after you choose, with two exercises for every body part.</p>
+    <p class="note">Tick Julian or Guest. Each person gets their own days, sets, and reps. Check off a body part when it is done.</p>
 
     <section class="controls">
       <h2>Days at the gym</h2>
       <div class="day-picker" id="day-picker"></div>
       <div class="week-toggle" id="week-toggle"></div>
       <div class="names">
-        <label>Julian
-          <input id="name-you" value="Julian" readonly>
-        </label>
-        <label>Guest
-          <input id="name-friend" maxlength="24" autocomplete="off">
-        </label>
+        <label class="pick"><input type="checkbox" id="pick-you"> Julian</label>
+        <div class="guest-line">
+          <label class="pick"><input type="checkbox" id="pick-friend"> Guest</label>
+          <input id="name-friend" maxlength="24" autocomplete="off" aria-label="Guest">
+        </div>
       </div>
     </section>
 
@@ -254,10 +284,10 @@
 
     const dayPicker = document.getElementById("day-picker");
     const weekToggle = document.getElementById("week-toggle");
-    const nameYou = document.getElementById("name-you");
     const nameFriend = document.getElementById("name-friend");
+    const pickYou = document.getElementById("pick-you");
+    const pickFriend = document.getElementById("pick-friend");
 
-    nameYou.value = "Julian";
     nameFriend.value = state.names.friend;
 
     for (let day = 1; day <= 6; day++) {
@@ -266,7 +296,7 @@
       button.textContent = String(day);
       button.setAttribute("aria-label", day + " gym days");
       button.addEventListener("click", () => {
-        state.days = day;
+        plan().days = day;
         save();
         render();
       });
@@ -287,31 +317,68 @@
     nameFriend.addEventListener("input", () => {
       state.names.friend = nameFriend.value.trim().slice(0, 24);
       save();
-      refreshNames();
+      render();
+    });
+    pickYou.addEventListener("change", () => {
+      if (pickYou.checked) state.person = "you";
+      else pickYou.checked = true;
+      save();
+      render();
+    });
+    pickFriend.addEventListener("change", () => {
+      if (pickFriend.checked) state.person = "friend";
+      else pickFriend.checked = true;
+      save();
+      render();
     });
 
     render();
 
     function load() {
-      const fallback = { days: null, names: { you: "Julian", friend: "" }, weights: {} };
+      const fallback = {
+        person: "you",
+        names: { friend: "" },
+        weights: {},
+        plans: { you: { days: null, checks: {} }, friend: { days: null, checks: {} } }
+      };
       try {
         const parsed = JSON.parse(localStorage.getItem("workout-plan-v1") || "null");
         if (!parsed) return fallback;
-        const days = Number(parsed.days);
         let guest = String(parsed.names && parsed.names.friend || "").trim();
-        if (guest === "Friend" || guest === "You") guest = "";
+        if (/^friends?(\s+name)?$/i.test(guest) || /^you$/i.test(guest)) guest = "";
+        const savedPlans = parsed.plans && typeof parsed.plans === "object" ? parsed.plans : {};
         return {
-          days: days >= 1 && days <= 6 ? days : null,
-          names: { you: "Julian", friend: guest.slice(0, 24) },
-          weights: parsed.weights && typeof parsed.weights === "object" ? parsed.weights : {}
+          person: parsed.person === "friend" ? "friend" : "you",
+          names: { friend: guest.slice(0, 24) },
+          weights: parsed.weights && typeof parsed.weights === "object" ? parsed.weights : {},
+          plans: {
+            you: normalizePlan(savedPlans.you, parsed.days),
+            friend: normalizePlan(savedPlans.friend, null)
+          }
         };
       } catch (error) {
         return fallback;
       }
     }
 
+    function normalizePlan(saved, legacyDays) {
+      const savedDays = Number(saved && saved.days);
+      const oldDays = Number(legacyDays);
+      const days = savedDays >= 1 && savedDays <= 6 ? savedDays : (oldDays >= 1 && oldDays <= 6 ? oldDays : null);
+      const checks = saved && saved.checks && typeof saved.checks === "object" ? saved.checks : {};
+      return { days, checks };
+    }
+
+    function plan() {
+      return state.plans[state.person];
+    }
+
     function guestLabel() {
       return state.names.friend || "Guest";
+    }
+
+    function personName() {
+      return state.person === "you" ? "Julian" : guestLabel();
     }
 
     function save() {
@@ -337,8 +404,9 @@
       return start.toLocaleDateString("en-US", options) + " – " + end.toLocaleDateString("en-US", options);
     }
 
-    function prescription(partIndex, slot, week) {
-      return OPTIONS[(partIndex * 2 + slot + week) % OPTIONS.length];
+    function prescription(partIndex, slot, week, person) {
+      const salt = person === "friend" ? 11 : 0;
+      return OPTIONS[(partIndex * 2 + slot + week + salt) % OPTIONS.length];
     }
 
     function scheme(item) {
@@ -354,8 +422,12 @@
       document.getElementById("title").textContent = weekOffset === 0 ? "This week" : "Next week";
       document.getElementById("week-of").textContent = "Week of " + formatRange(weekOffset);
 
+      pickYou.checked = state.person === "you";
+      pickFriend.checked = state.person === "friend";
+      const days = plan().days;
+
       [...dayPicker.children].forEach((button, index) => {
-        button.setAttribute("aria-pressed", String(index + 1 === state.days));
+        button.setAttribute("aria-pressed", String(index + 1 === days));
       });
       [...weekToggle.children].forEach((button, index) => {
         button.setAttribute("aria-pressed", String(index === weekOffset));
@@ -363,27 +435,27 @@
 
       const plan = document.getElementById("plan");
       const summary = document.getElementById("summary");
-      if (!state.days) {
+      if (!days) {
         plan.replaceChildren();
-        summary.textContent = "Choose 1 to 6 days and this week will fill in.";
+        summary.textContent = "Choose 1 to 6 days for " + personName() + " and this week will fill in.";
         return;
       }
 
-      const buckets = Array.from({ length: state.days }, (_, index) => ({
+      const buckets = Array.from({ length: days }, (_, index) => ({
         day: index + 1,
-        label: DAY_LABELS[state.days][index + 1],
+        label: DAY_LABELS[days][index + 1],
         parts: []
       }));
 
       PARTS.forEach((part, partIndex) => {
-        buckets[part.days[state.days] - 1].parts.push({
+        buckets[part.days[days] - 1].parts.push({
           id: part.id,
           name: part.name,
           exercises: part.exercises.map((name, slot) => ({
             id: part.id + "-" + (slot + 1),
             name,
-            current: prescription(partIndex, slot, week),
-            previous: prescription(partIndex, slot, week - 1)
+            current: prescription(partIndex, slot, week, state.person),
+            previous: prescription(partIndex, slot, week - 1, state.person)
           }))
         });
       });
@@ -402,19 +474,28 @@
           article.className = "part";
           article.dataset.part = part.id;
 
+          const doneKey = week + "|" + part.id;
           const head = document.createElement("div");
           head.className = "part-head";
           const title = document.createElement("h3");
           title.textContent = part.name;
-          const pills = document.createElement("div");
-          pills.className = "pills";
-          ["you", "friend"].forEach((who) => {
-            const pill = document.createElement("span");
-            pill.className = "pill";
-            pill.dataset.done = who;
-            pills.appendChild(pill);
+          const doneLabel = document.createElement("label");
+          doneLabel.className = "done-check";
+          const doneBox = document.createElement("input");
+          doneBox.type = "checkbox";
+          doneBox.checked = !!plan().checks[doneKey];
+          doneBox.setAttribute("aria-label", part.name + " done for " + personName());
+          const doneText = document.createElement("span");
+          doneText.textContent = "Done";
+          doneBox.addEventListener("change", () => {
+            if (doneBox.checked) plan().checks[doneKey] = true;
+            else delete plan().checks[doneKey];
+            article.classList.toggle("is-done", doneBox.checked);
+            save();
           });
-          head.append(title, pills);
+          doneLabel.append(doneBox, doneText);
+          head.append(title, doneLabel);
+          article.classList.toggle("is-done", doneBox.checked);
           article.appendChild(head);
 
           part.exercises.forEach((exercise) => {
@@ -430,70 +511,42 @@
             previous.className = "last";
             previous.textContent = "Last week " + scheme(exercise.previous);
             const weights = document.createElement("div");
-            weights.className = "weights";
-
-            ["you", "friend"].forEach((who) => {
-              const label = document.createElement("label");
-              label.className = "weight";
-              const caption = document.createElement("span");
-              caption.dataset.caption = who;
-              const input = document.createElement("input");
-              input.inputMode = "decimal";
-              input.autocomplete = "off";
-              input.placeholder = "Weight";
-              input.dataset.who = who;
-              input.value = state.weights[weightKey(week, exercise.id, who)] || "";
-              input.addEventListener("input", () => {
-                const key = weightKey(week, exercise.id, who);
-                if (input.value.trim()) state.weights[key] = input.value;
-                else delete state.weights[key];
-                save();
-                markDone(article);
-              });
-              label.append(caption, input);
-              weights.appendChild(label);
+            weights.className = "weights single";
+            const label = document.createElement("label");
+            label.className = "weight";
+            const caption = document.createElement("span");
+            caption.textContent = personName();
+            const input = document.createElement("input");
+            input.inputMode = "decimal";
+            input.autocomplete = "off";
+            input.placeholder = "Weight";
+            const who = state.person;
+            input.value = state.weights[weightKey(week, exercise.id, who)] || "";
+            input.addEventListener("input", () => {
+              const key = weightKey(week, exercise.id, who);
+              if (input.value.trim()) state.weights[key] = input.value;
+              else delete state.weights[key];
+              save();
             });
+            label.append(caption, input);
+            weights.appendChild(label);
 
             lift.append(name, current, previous, weights);
             article.appendChild(lift);
           });
 
-          markDone(article);
           section.appendChild(article);
         });
 
         plan.appendChild(section);
       });
 
-      document.getElementById("summary").textContent =
-        "8 body parts, each trained once, 2 exercises each. " +
-        state.days + (state.days === 1 ? " gym day." : " gym days.");
-      refreshNames();
-    }
-
-    function markDone(article) {
-      ["you", "friend"].forEach((who) => {
-        const inputs = [...article.querySelectorAll('input[data-who="' + who + '"]')];
-        const done = inputs.length === 2 && inputs.every((input) => input.value.trim() !== "");
-        const pill = article.querySelector('[data-done="' + who + '"]');
-        pill.classList.toggle("is-done", done);
-        const label = who === "you" ? "Julian" : guestLabel();
-        pill.textContent = done ? label + " done" : label;
-      });
-    }
-
-    function refreshNames() {
-      document.querySelectorAll("[data-caption='you']").forEach((node) => {
-        node.textContent = "Julian";
-      });
-      document.querySelectorAll("[data-caption='friend']").forEach((node) => {
-        node.textContent = guestLabel();
-      });
-      document.querySelectorAll(".part").forEach(markDone);
+      summary.textContent = personName() + " · " + days + (days === 1 ? " gym day. " : " gym days. ") +
+        "8 body parts, two exercises each.";
     }
 
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("sw.js?v=3").catch(() => {});
+      navigator.serviceWorker.register("sw.js?v=4").catch(() => {});
     }
   </script>
 </body>
