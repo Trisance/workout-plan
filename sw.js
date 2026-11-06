@@ -1,4 +1,4 @@
-const CACHE = "week-plan-v2";
+const CACHE = "week-plan-v3";
 const FILES = ["./", "./index.html", "./manifest.json"];
 
 self.addEventListener("install", (event) => {

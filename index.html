@@ -209,10 +209,10 @@
       <div class="day-picker" id="day-picker"></div>
       <div class="week-toggle" id="week-toggle"></div>
       <div class="names">
-        <label>Your name
-          <input id="name-you" maxlength="24" autocomplete="off">
+        <label>Julian
+          <input id="name-you" value="Julian" readonly>
         </label>
-        <label>Friend's name
+        <label>Guest
           <input id="name-friend" maxlength="24" autocomplete="off">
         </label>
       </div>
@@ -257,7 +257,7 @@
     const nameYou = document.getElementById("name-you");
     const nameFriend = document.getElementById("name-friend");
 
-    nameYou.value = state.names.you;
+    nameYou.value = "Julian";
     nameFriend.value = state.names.friend;
 
     for (let day = 1; day <= 6; day++) {
@@ -284,13 +284,8 @@
       weekToggle.appendChild(button);
     });
 
-    nameYou.addEventListener("input", () => {
-      state.names.you = nameYou.value.trim() || "You";
-      save();
-      refreshNames();
-    });
     nameFriend.addEventListener("input", () => {
-      state.names.friend = nameFriend.value.trim() || "Friend";
+      state.names.friend = nameFriend.value.trim().slice(0, 24);
       save();
       refreshNames();
     });
@@ -298,17 +293,16 @@
     render();
 
     function load() {
-      const fallback = { days: null, names: { you: "You", friend: "Friend" }, weights: {} };
+      const fallback = { days: null, names: { you: "Julian", friend: "" }, weights: {} };
       try {
         const parsed = JSON.parse(localStorage.getItem("workout-plan-v1") || "null");
         if (!parsed) return fallback;
         const days = Number(parsed.days);
+        let guest = String(parsed.names && parsed.names.friend || "").trim();
+        if (guest === "Friend" || guest === "You") guest = "";
         return {
           days: days >= 1 && days <= 6 ? days : null,
-          names: {
-            you: cleanName(parsed.names && parsed.names.you, "You"),
-            friend: cleanName(parsed.names && parsed.names.friend, "Friend")
-          },
+          names: { you: "Julian", friend: guest.slice(0, 24) },
           weights: parsed.weights && typeof parsed.weights === "object" ? parsed.weights : {}
         };
       } catch (error) {
@@ -316,9 +310,8 @@
       }
     }
 
-    function cleanName(value, fallback) {
-      const text = String(value || "").trim();
-      return text.slice(0, 24) || fallback;
+    function guestLabel() {
+      return state.names.friend || "Guest";
     }
 
     function save() {
@@ -484,22 +477,23 @@
         const done = inputs.length === 2 && inputs.every((input) => input.value.trim() !== "");
         const pill = article.querySelector('[data-done="' + who + '"]');
         pill.classList.toggle("is-done", done);
-        pill.textContent = done ? state.names[who] + " done" : state.names[who];
+        const label = who === "you" ? "Julian" : guestLabel();
+        pill.textContent = done ? label + " done" : label;
       });
     }
 
     function refreshNames() {
       document.querySelectorAll("[data-caption='you']").forEach((node) => {
-        node.textContent = state.names.you;
+        node.textContent = "Julian";
       });
       document.querySelectorAll("[data-caption='friend']").forEach((node) => {
-        node.textContent = state.names.friend;
+        node.textContent = guestLabel();
       });
       document.querySelectorAll(".part").forEach(markDone);
     }
 
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("sw.js").catch(() => {});
+      navigator.serviceWorker.register("sw.js?v=3").catch(() => {});
     }
   </script>
 </body>
