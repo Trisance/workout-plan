@@ -551,6 +551,19 @@
       return dayCount >= 5 ? 2 : 1;
     }
 
+    function hangSessions(dayCount) {
+      return dayCount >= 5 ? 2 : 1;
+    }
+
+    function hangSets(phase, person, occurrence) {
+      const shift = person === "teja" ? 1 : 0;
+      return [3, 4, 5][mod(phase + shift + (occurrence || 0) * 2, 3)];
+    }
+
+    function hangPlan(phase, person, occurrence) {
+      return { sets: hangSets(phase, person, occurrence), hangs: 15 };
+    }
+
     function prescription(partIndex, slot, phase, person, occurrence) {
       const id = partIndex * 2 + slot;
       const shift = person === "teja" ? 1 : 0;
@@ -577,6 +590,18 @@
           buckets[best].parts.push({ partIndex, occurrence: copy });
         });
       }
+      const days = buckets.map((_, index) => index);
+      let seed = mixSeed(phase + 19, person + "|hang") || 1;
+      for (let i = days.length - 1; i > 0; i--) {
+        seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+        const swap = seed % (i + 1);
+        const held = days[i];
+        days[i] = days[swap];
+        days[swap] = held;
+      }
+      days.slice(0, hangSessions(dayCount)).forEach((dayIndex, occurrence) => {
+        buckets[dayIndex].parts.push({ fingerboard: true, occurrence });
+      });
       return buckets;
     }
 
@@ -588,11 +613,18 @@
       const savedExercises = plan().lastWeek && plan().lastWeek.exercises;
       const saved = savedExercises && (savedExercises[exerciseId + "#" + (occurrence || 0)] || savedExercises[exerciseId]);
       if (saved) return saved;
+      if (exerciseId === "fingerboard") return hangPlan(plan().roll - 1, state.person, occurrence);
       return prescription(partIndex, slot, plan().roll - 1, state.person, occurrence || 0);
     }
 
     function scheme(item) {
+      if (item.hangs) return item.sets + " sets · " + item.hangs + "s hangs";
       return item.sets + " sets · " + item.reps + " reps";
+    }
+
+    function effort(exercise) {
+      const work = exercise.hangs ? exercise.sets + " sets · " + exercise.hangs + "s hangs" : exercise.sets + " sets · " + exercise.reps + " reps";
+      return exercise.name + " · " + work + (exercise.weight ? " · " + exercise.weight + " lb" : "");
     }
 
     function weightKey(week, exerciseId, who) {
@@ -613,6 +645,21 @@
       if (current.days) {
         weekBuckets(currentPhase, person, current.days).forEach((bucket) => {
           const parts = bucket.parts.map((slot) => {
+            if (slot.fingerboard) {
+              const prescribed = hangPlan(currentPhase, person, slot.occurrence);
+              const record = {
+                name: "Fingerboard",
+                sets: prescribed.sets,
+                hangs: prescribed.hangs,
+                weight: state.weights[weightKey(currentPhase, "fingerboard#" + slot.occurrence, person)] || ""
+              };
+              exercises["fingerboard#" + slot.occurrence] = record;
+              return {
+                name: "Fingerboard",
+                done: !!done["fingerboard|" + slot.occurrence],
+                exercises: [record]
+              };
+            }
             const part = PARTS[slot.partIndex];
             const visitKey = part.id + "|" + slot.occurrence;
             return {
@@ -702,6 +749,19 @@
       const buckets = weekBuckets(week, state.person, days).map((bucket) => ({
         day: bucket.day,
         parts: bucket.parts.map((slot) => {
+          if (slot.fingerboard) {
+            return {
+              id: "fingerboard",
+              name: "Fingerboard",
+              occurrence: slot.occurrence,
+              exercises: [{
+                id: "fingerboard",
+                name: "Fingerboard",
+                current: hangPlan(week, state.person, slot.occurrence),
+                previous: savedLast("fingerboard", 0, 0, slot.occurrence)
+              }]
+            };
+          }
           const part = PARTS[slot.partIndex];
           return {
             id: part.id,
@@ -759,9 +819,6 @@
           part.exercises.forEach((exercise) => {
             const lift = document.createElement("div");
             lift.className = "lift";
-            const name = document.createElement("div");
-            name.className = "lift-name";
-            name.textContent = exercise.name;
             const current = document.createElement("div");
             current.className = "scheme";
             current.textContent = scheme(exercise.current);
@@ -791,7 +848,13 @@
             label.append(caption, input);
             weights.appendChild(label);
 
-            lift.append(name, current, previous, weights);
+            if (exercise.name !== part.name) {
+              const name = document.createElement("div");
+              name.className = "lift-name";
+              name.textContent = exercise.name;
+              lift.appendChild(name);
+            }
+            lift.append(current, previous, weights);
             article.appendChild(lift);
           });
 
@@ -802,8 +865,10 @@
       });
 
       const visits = timesPerWeek(days);
+      const hangs = hangSessions(days);
       summary.textContent = personName() + " · " + days + (days === 1 ? " gym day. " : " gym days. ") +
-        "Each body part " + (visits === 1 ? "once" : "twice") + " this week.";
+        "Each body part " + (visits === 1 ? "once" : "twice") + " this week. Fingerboard " +
+        (hangs === 1 ? "once." : "on 2 days.");
 
       if (weekOffset === 0) {
         const roll = document.createElement("button");
@@ -853,8 +918,7 @@
                 part.exercises.forEach((exercise) => {
                   const line = document.createElement("p");
                   line.className = "scheme";
-                  line.textContent = exercise.name + " · " + exercise.sets + " sets · " + exercise.reps + " reps" +
-                    (exercise.weight ? " · " + exercise.weight + " lb" : "");
+                  line.textContent = effort(exercise);
                   card.appendChild(line);
                 });
               });
@@ -891,7 +955,7 @@
     }
 
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("sw.js?v=14").catch(() => {});
+      navigator.serviceWorker.register("sw.js?v=15").catch(() => {});
     }
   </script>
 </body>
