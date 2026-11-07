@@ -247,7 +247,7 @@
   <div class="wrap">
     <h1 id="title">This week</h1>
     <p class="week-of" id="week-of"></p>
-    <p class="note">Tick Julian or Teja. Each person gets their own days, sets, and reps. Save as previous week keeps this week so you can compare. Sets and reps stay different across the previous week, this week, and next week.</p>
+    <p class="note">Tick Julian or Teja. Each person gets their own days, sets, and reps. Body parts move to different days each week. Save as previous week keeps this week so you can compare. Sets and reps stay different across the previous week, this week, and next week.</p>
 
     <section class="controls">
       <h2>Days at the gym</h2>
@@ -276,14 +276,35 @@
       { id: "core", name: "Core", days: { 1: 1, 2: 2, 3: 3, 4: 3, 5: 3, 6: 4 }, exercises: ["Sit-up", "Leg raise"] }
     ];
 
-    const DAY_LABELS = {
-      1: { 1: "Full body" },
-      2: { 1: "Upper", 2: "Lower" },
-      3: { 1: "Push", 2: "Pull", 3: "Legs" },
-      4: { 1: "Chest and triceps", 2: "Back and biceps", 3: "Shoulders and core", 4: "Legs" },
-      5: { 1: "Chest", 2: "Back", 3: "Shoulders and core", 4: "Arms", 5: "Legs" },
-      6: { 1: "Chest", 2: "Back", 3: "Shoulders", 4: "Biceps and core", 5: "Triceps", 6: "Legs" }
-    };
+    function mixSeed(phase, person) {
+      const text = person + "|" + phase;
+      let hash = 2166136261;
+      for (let i = 0; i < text.length; i++) {
+        hash ^= text.charCodeAt(i);
+        hash = Math.imul(hash, 16777619);
+      }
+      return hash >>> 0;
+    }
+
+    function rotatedOrder(phase, person) {
+      const items = PARTS.map((_, index) => index);
+      let seed = mixSeed(phase, person) || 1;
+      for (let i = items.length - 1; i > 0; i--) {
+        seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+        const swap = seed % (i + 1);
+        const held = items[i];
+        items[i] = items[swap];
+        items[swap] = held;
+      }
+      const turn = mod(phase + (person === "teja" ? 3 : 0), items.length);
+      return items.slice(turn).concat(items.slice(0, turn));
+    }
+
+    function partOrder(phase, person) {
+      const turned = rotatedOrder(phase, person);
+      if (turned[0] === rotatedOrder(phase - 1, person)[0]) turned.push(turned.shift());
+      return turned;
+    }
 
     const state = load();
     let weekOffset = 0;
@@ -505,21 +526,29 @@
 
       const buckets = Array.from({ length: days }, (_, index) => ({
         day: index + 1,
-        label: DAY_LABELS[days][index + 1],
         parts: []
       }));
-
-      PARTS.forEach((part, partIndex) => {
-        buckets[part.days[days] - 1].parts.push({
-          id: part.id,
-          name: part.name,
-          exercises: part.exercises.map((name, slot) => ({
-            id: part.id + "-" + (slot + 1),
-            name,
-            current: prescription(partIndex, slot, week, state.person),
-            previous: savedLast(part.id + "-" + (slot + 1), partIndex, slot)
-          }))
+      const ordered = partOrder(week, state.person);
+      const perDay = Math.floor(ordered.length / days);
+      let extra = ordered.length % days;
+      let cursor = 0;
+      buckets.forEach((bucket) => {
+        const count = perDay + (extra > 0 ? 1 : 0);
+        if (extra > 0) extra -= 1;
+        ordered.slice(cursor, cursor + count).forEach((partIndex) => {
+          const part = PARTS[partIndex];
+          bucket.parts.push({
+            id: part.id,
+            name: part.name,
+            exercises: part.exercises.map((name, slot) => ({
+              id: part.id + "-" + (slot + 1),
+              name,
+              current: prescription(partIndex, slot, week, state.person),
+              previous: savedLast(part.id + "-" + (slot + 1), partIndex, slot)
+            }))
+          });
         });
+        cursor += count;
       });
 
       planList.replaceChildren();
@@ -528,7 +557,8 @@
         section.className = "day";
         const heading = document.createElement("h2");
         const exerciseCount = bucket.parts.reduce((sum, part) => sum + part.exercises.length, 0);
-        heading.textContent = "Day " + bucket.day + " · " + bucket.label + " · " + exerciseCount + " exercises";
+        const dayName = days === 1 ? "Full body" : bucket.parts.map((part) => part.name).join(", ");
+        heading.textContent = "Day " + bucket.day + " · " + dayName + " · " + exerciseCount + " exercises";
         section.appendChild(heading);
 
         bucket.parts.forEach((part) => {
@@ -621,7 +651,7 @@
     }
 
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("sw.js?v=8").catch(() => {});
+      navigator.serviceWorker.register("sw.js?v=9").catch(() => {});
     }
   </script>
 </body>
