@@ -650,8 +650,7 @@
               const record = {
                 name: "Fingerboard",
                 sets: prescribed.sets,
-                hangs: prescribed.hangs,
-                weight: state.weights[weightKey(currentPhase, "fingerboard#" + slot.occurrence, person)] || ""
+                hangs: prescribed.hangs
               };
               exercises["fingerboard#" + slot.occurrence] = record;
               return {
@@ -825,36 +824,39 @@
             const previous = document.createElement("div");
             previous.className = "last";
             const lastBits = "Previous week " + scheme(exercise.previous);
-            previous.textContent = exercise.previous.weight ? lastBits + " · " + exercise.previous.weight : lastBits;
-            const weights = document.createElement("div");
-            weights.className = "weights single";
-            const label = document.createElement("label");
-            label.className = "weight";
-            const caption = document.createElement("span");
-            caption.textContent = personName();
-            const input = document.createElement("input");
-            input.inputMode = "decimal";
-            input.autocomplete = "off";
-            input.placeholder = "Weight";
-            const who = state.person;
-            const liftKey = exercise.id + "#" + part.occurrence;
-            input.value = state.weights[weightKey(week, liftKey, who)] || "";
-            input.addEventListener("input", () => {
-              const key = weightKey(week, liftKey, who);
-              if (input.value.trim()) state.weights[key] = input.value;
-              else delete state.weights[key];
-              save();
-            });
-            label.append(caption, input);
-            weights.appendChild(label);
-
+            const hang = part.id === "fingerboard" || exercise.current.hangs;
+            previous.textContent = !hang && exercise.previous.weight ? lastBits + " · " + exercise.previous.weight : lastBits;
             if (exercise.name !== part.name) {
               const name = document.createElement("div");
               name.className = "lift-name";
               name.textContent = exercise.name;
               lift.appendChild(name);
             }
-            lift.append(current, previous, weights);
+            lift.append(current, previous);
+            if (!hang) {
+              const weights = document.createElement("div");
+              weights.className = "weights single";
+              const label = document.createElement("label");
+              label.className = "weight";
+              const caption = document.createElement("span");
+              caption.textContent = personName();
+              const input = document.createElement("input");
+              input.inputMode = "decimal";
+              input.autocomplete = "off";
+              input.placeholder = "Weight";
+              const who = state.person;
+              const liftKey = exercise.id + "#" + part.occurrence;
+              input.value = state.weights[weightKey(week, liftKey, who)] || "";
+              input.addEventListener("input", () => {
+                const key = weightKey(week, liftKey, who);
+                if (input.value.trim()) state.weights[key] = input.value;
+                else delete state.weights[key];
+                save();
+              });
+              label.append(caption, input);
+              weights.appendChild(label);
+              lift.appendChild(weights);
+            }
             article.appendChild(lift);
           });
 
@@ -976,7 +978,7 @@
     }
 
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("sw.js?v=16").catch(() => {});
+      navigator.serviceWorker.register("sw.js?v=17").catch(() => {});
     }
   </script>
 </body>
