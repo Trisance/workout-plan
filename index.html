@@ -216,6 +216,26 @@
       color: var(--muted);
     }
 
+    .roll {
+      display: block;
+      width: 100%;
+      margin-top: 18px;
+      min-height: 48px;
+      border: 0;
+      border-radius: 12px;
+      background: var(--accent);
+      color: var(--accent-ink);
+      font-weight: 650;
+      cursor: pointer;
+    }
+
+    .roll-note {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      text-align: center;
+    }
+
     .foot {
       margin: 22px 0 0;
       font-size: 13px;
@@ -227,7 +247,7 @@
   <div class="wrap">
     <h1 id="title">This week</h1>
     <p class="week-of" id="week-of"></p>
-    <p class="note">Tick Julian or Teja. Each person gets their own days, sets, and reps. Check off a body part when it is done.</p>
+    <p class="note">Tick Julian or Teja. Each person gets their own days, sets, and reps. Roll over saves this week as last week. Sets and reps stay different across last week, this week, and next week.</p>
 
     <section class="controls">
       <h2>Days at the gym</h2>
@@ -245,11 +265,6 @@
   </div>
 
   <script>
-    const OPTIONS = [];
-    for (let sets = 3; sets <= 5; sets++) {
-      for (let reps = 6; reps <= 12; reps++) OPTIONS.push({ sets, reps });
-    }
-
     const PARTS = [
       { id: "chest", name: "Chest", days: { 1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1 }, exercises: ["Push-up", "Dumbbell bench press"] },
       { id: "back", name: "Back", days: { 1: 1, 2: 1, 3: 2, 4: 2, 5: 2, 6: 2 }, exercises: ["Dumbbell row", "Lat pulldown"] },
@@ -321,7 +336,10 @@
       const fallback = {
         person: "you",
         weights: {},
-        plans: { you: { days: null, checks: {} }, teja: { days: null, checks: {} } }
+        plans: {
+          you: { days: null, checks: {}, roll: 0, lastWeek: null },
+          teja: { days: null, checks: {}, roll: 0, lastWeek: null }
+        }
       };
       try {
         const parsed = JSON.parse(localStorage.getItem("workout-plan-v1") || "null");
@@ -367,7 +385,9 @@
       const oldDays = Number(legacyDays);
       const days = savedDays >= 1 && savedDays <= 6 ? savedDays : (oldDays >= 1 && oldDays <= 6 ? oldDays : null);
       const checks = saved && saved.checks && typeof saved.checks === "object" ? saved.checks : {};
-      return { days, checks };
+      const roll = Number(saved && saved.roll);
+      const lastWeek = saved && saved.lastWeek && saved.lastWeek.exercises ? saved.lastWeek : null;
+      return { days, checks, roll: roll >= 0 && roll < 100000 ? roll : 0, lastWeek };
     }
 
     function plan() {
@@ -401,9 +421,27 @@
       return start.toLocaleDateString("en-US", options) + " – " + end.toLocaleDateString("en-US", options);
     }
 
-    function prescription(partIndex, slot, week, person) {
-      const salt = person === "teja" ? 11 : 0;
-      return OPTIONS[(partIndex * 2 + slot + week + salt) % OPTIONS.length];
+    function mod(value, size) {
+      return ((value % size) + size) % size;
+    }
+
+    function prescription(partIndex, slot, phase, person) {
+      const id = partIndex * 2 + slot;
+      const shift = person === "teja" ? 1 : 0;
+      return {
+        sets: [3, 4, 5][mod(id + phase + shift, 3)],
+        reps: [6, 7, 8, 9, 10, 11, 12][mod(id * 2 + phase + shift * 3, 7)]
+      };
+    }
+
+    function phase() {
+      return (Number(plan().roll) || 0) + weekOffset;
+    }
+
+    function savedLast(exerciseId, partIndex, slot) {
+      const saved = plan().lastWeek && plan().lastWeek.exercises[exerciseId];
+      if (saved) return saved;
+      return prescription(partIndex, slot, plan().roll - 1, state.person);
     }
 
     function scheme(item) {
@@ -414,10 +452,35 @@
       return week + "|" + exerciseId + "|" + who;
     }
 
+    function rollOver() {
+      const current = plan();
+      if (!current.roll) current.roll = 0;
+      const currentPhase = current.roll;
+      const exercises = {};
+      PARTS.forEach((part, partIndex) => {
+        part.exercises.forEach((name, slot) => {
+          const id = part.id + "-" + (slot + 1);
+          const prescribed = prescription(partIndex, slot, currentPhase, state.person);
+          exercises[id] = {
+            name,
+            sets: prescribed.sets,
+            reps: prescribed.reps,
+            weight: state.weights[weightKey(currentPhase, id, state.person)] || ""
+          };
+        });
+      });
+      current.lastWeek = { days: current.days, exercises };
+      current.roll += 1;
+      weekOffset = 0;
+      save();
+      render();
+    }
+
     function render() {
-      const week = weekIndex(weekOffset);
+      const week = phase();
       document.getElementById("title").textContent = weekOffset === 0 ? "This week" : "Next week";
-      document.getElementById("week-of").textContent = "Week of " + formatRange(weekOffset);
+      document.getElementById("week-of").textContent = "Week of " + formatRange(weekOffset) +
+        (weekOffset === 0 && plan().lastWeek ? " · last week saved" : "");
 
       syncingPerson = true;
       pickYou.checked = state.person === "you";
@@ -454,7 +517,7 @@
             id: part.id + "-" + (slot + 1),
             name,
             current: prescription(partIndex, slot, week, state.person),
-            previous: prescription(partIndex, slot, week - 1, state.person)
+            previous: savedLast(part.id + "-" + (slot + 1), partIndex, slot)
           }))
         });
       });
@@ -508,7 +571,8 @@
             current.textContent = scheme(exercise.current);
             const previous = document.createElement("div");
             previous.className = "last";
-            previous.textContent = "Last week " + scheme(exercise.previous);
+            const lastBits = "Last week " + scheme(exercise.previous);
+            previous.textContent = exercise.previous.weight ? lastBits + " · " + exercise.previous.weight : lastBits;
             const weights = document.createElement("div");
             weights.className = "weights single";
             const label = document.createElement("label");
@@ -542,10 +606,22 @@
 
       summary.textContent = personName() + " · " + days + (days === 1 ? " gym day. " : " gym days. ") +
         "8 body parts, two exercises each.";
+
+      if (weekOffset === 0) {
+        const roll = document.createElement("button");
+        roll.type = "button";
+        roll.className = "roll";
+        roll.textContent = "Roll over";
+        roll.addEventListener("click", rollOver);
+        const rollNote = document.createElement("p");
+        rollNote.className = "roll-note";
+        rollNote.textContent = "Saves this week as last week, then fills in a new week.";
+        planList.append(roll, rollNote);
+      }
     }
 
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("sw.js?v=6").catch(() => {});
+      navigator.serviceWorker.register("sw.js?v=7").catch(() => {});
     }
   </script>
 </body>
