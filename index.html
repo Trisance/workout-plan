@@ -713,7 +713,7 @@
       document.getElementById("note").hidden = screen !== "plan";
       if (screen !== "plan") {
         document.getElementById("title").textContent = openWeek ? "Saved week" : "Previous weeks";
-        document.getElementById("week-of").textContent = openWeek ? "Week of " + openWeek.range : "Tap a week to see what Julian and Teja finished.";
+        document.getElementById("week-of").textContent = openWeek ? "Week of " + openWeek.range : "Tap a week to see what " + personName() + " finished.";
         renderHistory();
         return;
       }
@@ -883,6 +883,56 @@
       }
     }
 
+    function historySnapshot(entry) {
+      const people = Array.isArray(entry && entry.people) ? entry.people : [];
+      const name = personName();
+      const named = people.find((person) => person && person.name === name);
+      const person = named || people[state.person === "teja" ? 1 : 0];
+      if (!person || (person.name && person.name !== name)) return null;
+      const scale = String(person.scale || "").trim();
+      const schedule = Array.isArray(person.schedule) ? person.schedule : [];
+      const hasDays = schedule.some((day) => day && Array.isArray(day.parts) && day.parts.length);
+      const exercises = person.exercises;
+      const hasExercises = !!(exercises && typeof exercises === "object" && Object.keys(exercises).length);
+      if (!scale && !(Number(person.days) >= 1) && !hasDays && !hasExercises) return null;
+      return person;
+    }
+
+    function historyDoneCount(person) {
+      return (person.schedule || []).reduce((sum, day) => sum + ((day && day.parts) || []).filter((part) => part.done).length, 0);
+    }
+
+    function renderHistoryPerson(history, person) {
+      const card = document.createElement("article");
+      card.className = "part history-person";
+      const title = document.createElement("h3");
+      title.textContent = person.name || personName();
+      const scale = document.createElement("p");
+      scale.textContent = person.scale ? "Scale weight " + person.scale + " lb" : "Scale weight not entered";
+      card.append(title, scale);
+      if (!person.schedule || !person.schedule.length) {
+        const empty = document.createElement("p");
+        empty.className = "last";
+        empty.textContent = "No gym days were selected.";
+        card.appendChild(empty);
+      } else {
+        person.schedule.forEach((day) => {
+          (day.parts || []).forEach((part) => {
+            const heading = document.createElement("h3");
+            heading.textContent = part.name + (part.done ? " · done" : " · not done");
+            card.appendChild(heading);
+            (part.exercises || []).forEach((exercise) => {
+              const line = document.createElement("p");
+              line.className = "scheme";
+              line.textContent = effort(exercise);
+              card.appendChild(line);
+            });
+          });
+        });
+      }
+      history.appendChild(card);
+    }
+
     function renderHistory() {
       const history = document.getElementById("history");
       history.replaceChildren();
@@ -896,40 +946,13 @@
           render();
         });
         history.appendChild(back);
-        openWeek.people.forEach((person) => {
-          const card = document.createElement("article");
-          card.className = "part history-person";
-          const title = document.createElement("h3");
-          title.textContent = person.name;
-          const scale = document.createElement("p");
-          scale.textContent = person.scale ? "Scale weight " + person.scale + " lb" : "Scale weight not entered";
-          card.append(title, scale);
-          if (!person.schedule || !person.schedule.length) {
-            const empty = document.createElement("p");
-            empty.className = "last";
-            empty.textContent = "No gym days were selected.";
-            card.appendChild(empty);
-          } else {
-            person.schedule.forEach((day) => {
-              day.parts.forEach((part) => {
-                const heading = document.createElement("h3");
-                heading.textContent = part.name + (part.done ? " · done" : " · not done");
-                card.appendChild(heading);
-                part.exercises.forEach((exercise) => {
-                  const line = document.createElement("p");
-                  line.className = "scheme";
-                  line.textContent = effort(exercise);
-                  card.appendChild(line);
-                });
-              });
-            });
-          }
-          history.appendChild(card);
-        });
+        const person = historySnapshot(openWeek);
+        if (person) renderHistoryPerson(history, person);
         return;
       }
 
-      if (!state.archive.length) {
+      const weeks = state.archive.filter((entry) => historySnapshot(entry));
+      if (!weeks.length) {
         const empty = document.createElement("p");
         empty.className = "summary";
         empty.textContent = "No previous weeks yet. Save this week and it will show up here.";
@@ -937,15 +960,13 @@
         return;
       }
 
-      state.archive.forEach((entry) => {
+      weeks.forEach((entry) => {
+        const person = historySnapshot(entry);
         const button = document.createElement("button");
         button.type = "button";
         button.className = "week-link";
-        const bits = entry.people.map((person) => {
-          const done = (person.schedule || []).reduce((sum, day) => sum + day.parts.filter((part) => part.done).length, 0);
-          return person.name + (person.scale ? " " + person.scale + " lb" : "") + " · " + done + " done";
-        });
-        button.textContent = entry.range + " — " + bits.join(" · ");
+        const scale = String(person.scale || "").trim();
+        button.textContent = entry.range + " — " + (person.name || personName()) + (scale ? " " + scale + " lb" : "") + " · " + historyDoneCount(person) + " done";
         button.addEventListener("click", () => {
           openWeek = entry;
           render();
@@ -955,7 +976,7 @@
     }
 
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("sw.js?v=15").catch(() => {});
+      navigator.serviceWorker.register("sw.js?v=16").catch(() => {});
     }
   </script>
 </body>
