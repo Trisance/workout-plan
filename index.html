@@ -303,18 +303,17 @@
       weekToggle.appendChild(button);
     });
 
-    pickYou.addEventListener("change", () => {
-      if (pickYou.checked) state.person = "you";
-      else pickYou.checked = true;
+    let syncingPerson = false;
+
+    function selectPerson(person) {
+      if (syncingPerson) return;
+      state.person = person;
       save();
       render();
-    });
-    pickTeja.addEventListener("change", () => {
-      if (pickTeja.checked) state.person = "teja";
-      else pickTeja.checked = true;
-      save();
-      render();
-    });
+    }
+
+    pickYou.addEventListener("change", () => selectPerson("you"));
+    pickTeja.addEventListener("change", () => selectPerson("teja"));
 
     render();
 
@@ -420,9 +419,12 @@
       document.getElementById("title").textContent = weekOffset === 0 ? "This week" : "Next week";
       document.getElementById("week-of").textContent = "Week of " + formatRange(weekOffset);
 
+      syncingPerson = true;
       pickYou.checked = state.person === "you";
       pickTeja.checked = state.person === "teja";
+      syncingPerson = false;
       const days = plan().days;
+      const planList = document.getElementById("plan");
 
       [...dayPicker.children].forEach((button, index) => {
         button.setAttribute("aria-pressed", String(index + 1 === days));
@@ -431,10 +433,9 @@
         button.setAttribute("aria-pressed", String(index === weekOffset));
       });
 
-      const plan = document.getElementById("plan");
       const summary = document.getElementById("summary");
       if (!days) {
-        plan.replaceChildren();
+        planList.replaceChildren();
         summary.textContent = "Choose 1 to 6 days for " + personName() + " and this week will fill in.";
         return;
       }
@@ -458,7 +459,7 @@
         });
       });
 
-      plan.replaceChildren();
+      planList.replaceChildren();
       buckets.forEach((bucket) => {
         const section = document.createElement("section");
         section.className = "day";
@@ -536,7 +537,7 @@
           section.appendChild(article);
         });
 
-        plan.appendChild(section);
+        planList.appendChild(section);
       });
 
       summary.textContent = personName() + " · " + days + (days === 1 ? " gym day. " : " gym days. ") +
@@ -544,7 +545,7 @@
     }
 
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("sw.js?v=5").catch(() => {});
+      navigator.serviceWorker.register("sw.js?v=6").catch(() => {});
     }
   </script>
 </body>
