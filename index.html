@@ -82,9 +82,9 @@
 
     .day-picker { grid-template-columns: repeat(6, 1fr); }
 
-    .week-toggle, .names { grid-template-columns: 1fr 1fr; }
+    .week-toggle, .names, .page-tabs { grid-template-columns: 1fr 1fr; }
 
-    .day-picker button, .week-toggle button {
+    .day-picker button, .week-toggle button, .page-tabs button, .week-link {
       border: 1px solid var(--line);
       background: #fff;
       border-radius: 10px;
@@ -93,7 +93,8 @@
     }
 
     .day-picker button[aria-pressed="true"],
-    .week-toggle button[aria-pressed="true"] {
+    .week-toggle button[aria-pressed="true"],
+    .page-tabs button[aria-pressed="true"] {
       background: var(--accent);
       border-color: var(--accent);
       color: var(--accent-ink);
@@ -236,6 +237,24 @@
       text-align: center;
     }
 
+    .page-tabs { margin-top: 16px; }
+
+    .week-link {
+      width: 100%;
+      margin-top: 10px;
+      text-align: left;
+      padding: 12px 14px;
+    }
+
+    .back {
+      margin-top: 0;
+      background: #fff;
+      color: var(--ink);
+      border: 1px solid var(--line);
+    }
+
+    .scale-card h2, .history-person h3 { text-transform: none; letter-spacing: 0; font-size: 18px; }
+
     .foot {
       margin: 22px 0 0;
       font-size: 13px;
@@ -246,9 +265,14 @@
 <body>
   <div class="wrap">
     <h1 id="title">This week</h1>
+    <div class="week-toggle page-tabs" id="page-tabs">
+      <button type="button" id="tab-plan">This week</button>
+      <button type="button" id="tab-history">Previous weeks</button>
+    </div>
     <p class="week-of" id="week-of"></p>
-    <p class="note">Tick Julian or Teja. Each person gets their own days, sets, and reps. Body parts move to different days each week. Save as previous week keeps this week so you can compare. Sets and reps stay different across the previous week, this week, and next week.</p>
+    <p class="note" id="note">Tick Julian or Teja. Each person gets their own days, sets, and reps. Body parts move to different days each week. Save as previous week keeps the dates, scale weights, and what each person marked done.</p>
 
+    <div id="planner">
     <section class="controls">
       <h2>Days at the gym</h2>
       <div class="day-picker" id="day-picker"></div>
@@ -259,8 +283,22 @@
       </div>
     </section>
 
+    <section class="controls scale-card" id="scale-card">
+      <h2>Scale weight</h2>
+      <div class="names">
+        <label>Julian
+          <input id="scale-you" inputmode="decimal" autocomplete="off" placeholder="Pounds">
+        </label>
+        <label>Teja
+          <input id="scale-teja" inputmode="decimal" autocomplete="off" placeholder="Pounds">
+        </label>
+      </div>
+    </section>
+
     <p class="summary" id="summary"></p>
     <div id="plan"></div>
+    </div>
+    <div id="history" hidden></div>
     <p class="foot">On your phone, open the share menu and tap Add to Home Screen. After this page loads once, it opens at the gym from the phone. Weights stay on that phone.</p>
   </div>
 
@@ -313,6 +351,12 @@
     const weekToggle = document.getElementById("week-toggle");
     const pickYou = document.getElementById("pick-you");
     const pickTeja = document.getElementById("pick-teja");
+    const scaleYou = document.getElementById("scale-you");
+    const scaleTeja = document.getElementById("scale-teja");
+    const tabPlan = document.getElementById("tab-plan");
+    const tabHistory = document.getElementById("tab-history");
+    let screen = "plan";
+    let openWeek = null;
     forgetStoredName();
 
     for (let day = 1; day <= 6; day++) {
@@ -350,6 +394,24 @@
 
     pickYou.addEventListener("change", () => selectPerson("you"));
     pickTeja.addEventListener("change", () => selectPerson("teja"));
+    tabPlan.addEventListener("click", () => {
+      screen = "plan";
+      openWeek = null;
+      render();
+    });
+    tabHistory.addEventListener("click", () => {
+      screen = "history";
+      openWeek = null;
+      render();
+    });
+    scaleYou.addEventListener("input", () => {
+      state.scales[scaleKey("you")] = scaleYou.value.trim();
+      save();
+    });
+    scaleTeja.addEventListener("input", () => {
+      state.scales[scaleKey("teja")] = scaleTeja.value.trim();
+      save();
+    });
 
     render();
 
@@ -360,7 +422,9 @@
         plans: {
           you: { days: null, checks: {}, roll: 0, lastWeek: null },
           teja: { days: null, checks: {}, roll: 0, lastWeek: null }
-        }
+        },
+        scales: {},
+        archive: []
       };
       try {
         const parsed = JSON.parse(localStorage.getItem("workout-plan-v1") || "null");
@@ -370,6 +434,8 @@
         return {
           person: parsed.person === "teja" || parsed.person === "friend" ? "teja" : "you",
           weights: migrateWeights(parsed.weights),
+          scales: parsed.scales && typeof parsed.scales === "object" ? parsed.scales : {},
+          archive: Array.isArray(parsed.archive) ? parsed.archive : [],
           plans: {
             you: normalizePlan(savedPlans.you, parsed.days),
             teja: normalizePlan(tejaPlan, null)
@@ -415,8 +481,17 @@
       return state.plans[state.person];
     }
 
-    function personName() {
-      return state.person === "you" ? "Julian" : "Teja";
+    function personName(person) {
+      const who = person || state.person;
+      return who === "you" ? "Julian" : "Teja";
+    }
+
+    function personPhase(person) {
+      return (Number(state.plans[person].roll) || 0) + weekOffset;
+    }
+
+    function scaleKey(person) {
+      return person + "|" + personPhase(person);
     }
 
     function save() {
@@ -473,33 +548,88 @@
       return week + "|" + exerciseId + "|" + who;
     }
 
-    function rollOver() {
-      const current = plan();
-      if (!current.roll) current.roll = 0;
-      const currentPhase = current.roll;
-      const exercises = {};
-      PARTS.forEach((part, partIndex) => {
-        part.exercises.forEach((name, slot) => {
-          const id = part.id + "-" + (slot + 1);
-          const prescribed = prescription(partIndex, slot, currentPhase, state.person);
-          exercises[id] = {
-            name,
-            sets: prescribed.sets,
-            reps: prescribed.reps,
-            weight: state.weights[weightKey(currentPhase, id, state.person)] || ""
-          };
-        });
+    function snapshotPerson(person) {
+      const current = state.plans[person];
+      const currentPhase = Number(current.roll) || 0;
+      const done = {};
+      Object.keys(current.checks).forEach((key) => {
+        if (key.indexOf(currentPhase + "|") === 0 && current.checks[key]) {
+          done[key.slice(String(currentPhase).length + 1)] = true;
+        }
       });
-      current.lastWeek = { days: current.days, exercises };
-      current.roll += 1;
+      const exercises = {};
+      const schedule = [];
+      if (current.days) {
+        const ordered = partOrder(currentPhase, person);
+        const perDay = Math.floor(ordered.length / current.days);
+        let extra = ordered.length % current.days;
+        let cursor = 0;
+        for (let day = 1; day <= current.days; day++) {
+          const count = perDay + (extra > 0 ? 1 : 0);
+          if (extra > 0) extra -= 1;
+          const parts = ordered.slice(cursor, cursor + count).map((partIndex) => {
+            const part = PARTS[partIndex];
+            return {
+              name: part.name,
+              done: !!done[part.id],
+              exercises: part.exercises.map((name, slot) => {
+                const id = part.id + "-" + (slot + 1);
+                const prescribed = prescription(partIndex, slot, currentPhase, person);
+                const record = {
+                  name,
+                  sets: prescribed.sets,
+                  reps: prescribed.reps,
+                  weight: state.weights[weightKey(currentPhase, id, person)] || ""
+                };
+                exercises[id] = record;
+                return record;
+              })
+            };
+          });
+          schedule.push({ day, parts });
+          cursor += count;
+        }
+      }
+      return {
+        name: personName(person),
+        scale: state.scales[person + "|" + currentPhase] || "",
+        days: current.days,
+        schedule,
+        exercises
+      };
+    }
+
+    function rollOver() {
+      const people = ["you", "teja"].map(snapshotPerson);
+      state.archive.unshift({ id: Date.now(), range: formatRange(0), people });
+      ["you", "teja"].forEach((person, index) => {
+        const current = state.plans[person];
+        if (!current.roll) current.roll = 0;
+        current.lastWeek = { days: current.days, exercises: people[index].exercises };
+        current.roll += 1;
+      });
       weekOffset = 0;
       save();
       render();
     }
 
     function render() {
+      tabPlan.setAttribute("aria-pressed", String(screen === "plan"));
+      tabHistory.setAttribute("aria-pressed", String(screen !== "plan"));
+      document.getElementById("planner").hidden = screen !== "plan";
+      document.getElementById("history").hidden = screen === "plan";
+      document.getElementById("note").hidden = screen !== "plan";
+      if (screen !== "plan") {
+        document.getElementById("title").textContent = openWeek ? "Saved week" : "Previous weeks";
+        document.getElementById("week-of").textContent = openWeek ? "Week of " + openWeek.range : "Tap a week to see what Julian and Teja finished.";
+        renderHistory();
+        return;
+      }
+
       const week = phase();
       document.getElementById("title").textContent = weekOffset === 0 ? "This week" : "Next week";
+      if (document.activeElement !== scaleYou) scaleYou.value = state.scales[scaleKey("you")] || "";
+      if (document.activeElement !== scaleTeja) scaleTeja.value = state.scales[scaleKey("teja")] || "";
       document.getElementById("week-of").textContent = "Week of " + formatRange(weekOffset) +
         (weekOffset === 0 && plan().lastWeek ? " · previous week saved" : "");
 
@@ -650,8 +780,80 @@
       }
     }
 
+    function renderHistory() {
+      const history = document.getElementById("history");
+      history.replaceChildren();
+      if (openWeek) {
+        const back = document.createElement("button");
+        back.type = "button";
+        back.className = "roll back";
+        back.textContent = "All previous weeks";
+        back.addEventListener("click", () => {
+          openWeek = null;
+          render();
+        });
+        history.appendChild(back);
+        openWeek.people.forEach((person) => {
+          const card = document.createElement("article");
+          card.className = "part history-person";
+          const title = document.createElement("h3");
+          title.textContent = person.name;
+          const scale = document.createElement("p");
+          scale.textContent = person.scale ? "Scale weight " + person.scale + " lb" : "Scale weight not entered";
+          card.append(title, scale);
+          if (!person.schedule || !person.schedule.length) {
+            const empty = document.createElement("p");
+            empty.className = "last";
+            empty.textContent = "No gym days were selected.";
+            card.appendChild(empty);
+          } else {
+            person.schedule.forEach((day) => {
+              day.parts.forEach((part) => {
+                const heading = document.createElement("h3");
+                heading.textContent = part.name + (part.done ? " · done" : " · not done");
+                card.appendChild(heading);
+                part.exercises.forEach((exercise) => {
+                  const line = document.createElement("p");
+                  line.className = "scheme";
+                  line.textContent = exercise.name + " · " + exercise.sets + " sets · " + exercise.reps + " reps" +
+                    (exercise.weight ? " · " + exercise.weight + " lb" : "");
+                  card.appendChild(line);
+                });
+              });
+            });
+          }
+          history.appendChild(card);
+        });
+        return;
+      }
+
+      if (!state.archive.length) {
+        const empty = document.createElement("p");
+        empty.className = "summary";
+        empty.textContent = "No previous weeks yet. Save this week and it will show up here.";
+        history.appendChild(empty);
+        return;
+      }
+
+      state.archive.forEach((entry) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "week-link";
+        const bits = entry.people.map((person) => {
+          const done = (person.schedule || []).reduce((sum, day) => sum + day.parts.filter((part) => part.done).length, 0);
+          return person.name + (person.scale ? " " + person.scale + " lb" : "") + " · " + done + " done";
+        });
+        button.textContent = entry.range + " — " + bits.join(" · ");
+        button.addEventListener("click", () => {
+          openWeek = entry;
+          render();
+        });
+        history.appendChild(button);
+      });
+    }
+
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("sw.js?v=9").catch(() => {});
+      navigator.serviceWorker.register("sw.js?v=10").catch(() => {});
     }
   </script>
 </body>
