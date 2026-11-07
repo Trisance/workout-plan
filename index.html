@@ -99,12 +99,6 @@
       color: var(--accent-ink);
     }
 
-    .names label, .guest-line {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-
     .names .pick {
       display: flex;
       flex-direction: row;
@@ -123,7 +117,7 @@
       accent-color: var(--accent);
     }
 
-    .names input:not([type="checkbox"]), .weight input {
+    .weight input {
       width: 100%;
       border: 1px solid var(--line);
       background: #fff;
@@ -233,7 +227,7 @@
   <div class="wrap">
     <h1 id="title">This week</h1>
     <p class="week-of" id="week-of"></p>
-    <p class="note">Tick Julian or Guest. Each person gets their own days, sets, and reps. Check off a body part when it is done.</p>
+    <p class="note">Tick Julian or Teja. Each person gets their own days, sets, and reps. Check off a body part when it is done.</p>
 
     <section class="controls">
       <h2>Days at the gym</h2>
@@ -241,10 +235,7 @@
       <div class="week-toggle" id="week-toggle"></div>
       <div class="names">
         <label class="pick"><input type="checkbox" id="pick-you"> Julian</label>
-        <div class="guest-line">
-          <label class="pick"><input type="checkbox" id="pick-friend"> Guest</label>
-          <input id="name-friend" maxlength="24" autocomplete="off" aria-label="Guest">
-        </div>
+        <label class="pick"><input type="checkbox" id="pick-teja"> Teja</label>
       </div>
     </section>
 
@@ -284,11 +275,9 @@
 
     const dayPicker = document.getElementById("day-picker");
     const weekToggle = document.getElementById("week-toggle");
-    const nameFriend = document.getElementById("name-friend");
     const pickYou = document.getElementById("pick-you");
-    const pickFriend = document.getElementById("pick-friend");
-
-    nameFriend.value = state.names.friend;
+    const pickTeja = document.getElementById("pick-teja");
+    forgetStoredName();
 
     for (let day = 1; day <= 6; day++) {
       const button = document.createElement("button");
@@ -314,20 +303,15 @@
       weekToggle.appendChild(button);
     });
 
-    nameFriend.addEventListener("input", () => {
-      state.names.friend = nameFriend.value.trim().slice(0, 24);
-      save();
-      render();
-    });
     pickYou.addEventListener("change", () => {
       if (pickYou.checked) state.person = "you";
       else pickYou.checked = true;
       save();
       render();
     });
-    pickFriend.addEventListener("change", () => {
-      if (pickFriend.checked) state.person = "friend";
-      else pickFriend.checked = true;
+    pickTeja.addEventListener("change", () => {
+      if (pickTeja.checked) state.person = "teja";
+      else pickTeja.checked = true;
       save();
       render();
     });
@@ -337,28 +321,46 @@
     function load() {
       const fallback = {
         person: "you",
-        names: { friend: "" },
         weights: {},
-        plans: { you: { days: null, checks: {} }, friend: { days: null, checks: {} } }
+        plans: { you: { days: null, checks: {} }, teja: { days: null, checks: {} } }
       };
       try {
         const parsed = JSON.parse(localStorage.getItem("workout-plan-v1") || "null");
         if (!parsed) return fallback;
-        let guest = String(parsed.names && parsed.names.friend || "").trim();
-        if (/^friends?(\s+name)?$/i.test(guest) || /^you$/i.test(guest)) guest = "";
         const savedPlans = parsed.plans && typeof parsed.plans === "object" ? parsed.plans : {};
+        const tejaPlan = savedPlans.teja || savedPlans.friend;
         return {
-          person: parsed.person === "friend" ? "friend" : "you",
-          names: { friend: guest.slice(0, 24) },
-          weights: parsed.weights && typeof parsed.weights === "object" ? parsed.weights : {},
+          person: parsed.person === "teja" || parsed.person === "friend" ? "teja" : "you",
+          weights: migrateWeights(parsed.weights),
           plans: {
             you: normalizePlan(savedPlans.you, parsed.days),
-            friend: normalizePlan(savedPlans.friend, null)
+            teja: normalizePlan(tejaPlan, null)
           }
         };
       } catch (error) {
         return fallback;
       }
+    }
+
+    function migrateWeights(weights) {
+      const source = weights && typeof weights === "object" ? weights : {};
+      const next = {};
+      Object.keys(source).forEach((key) => {
+        const migrated = key.endsWith("|friend") ? key.slice(0, -7) + "|teja" : key;
+        if (next[migrated] == null || next[migrated] === "") next[migrated] = source[key];
+      });
+      return next;
+    }
+
+    function forgetStoredName() {
+      try {
+        const parsed = JSON.parse(localStorage.getItem("workout-plan-v1") || "null");
+        if (!parsed) return;
+        const storedWeights = parsed.weights && typeof parsed.weights === "object" ? parsed.weights : {};
+        const legacy = parsed.names || parsed.person === "friend" || (parsed.plans && parsed.plans.friend) ||
+          Object.keys(storedWeights).some((key) => key.endsWith("|friend"));
+        if (legacy) save();
+      } catch (error) {}
     }
 
     function normalizePlan(saved, legacyDays) {
@@ -373,12 +375,8 @@
       return state.plans[state.person];
     }
 
-    function guestLabel() {
-      return state.names.friend || "Guest";
-    }
-
     function personName() {
-      return state.person === "you" ? "Julian" : guestLabel();
+      return state.person === "you" ? "Julian" : "Teja";
     }
 
     function save() {
@@ -405,7 +403,7 @@
     }
 
     function prescription(partIndex, slot, week, person) {
-      const salt = person === "friend" ? 11 : 0;
+      const salt = person === "teja" ? 11 : 0;
       return OPTIONS[(partIndex * 2 + slot + week + salt) % OPTIONS.length];
     }
 
@@ -423,7 +421,7 @@
       document.getElementById("week-of").textContent = "Week of " + formatRange(weekOffset);
 
       pickYou.checked = state.person === "you";
-      pickFriend.checked = state.person === "friend";
+      pickTeja.checked = state.person === "teja";
       const days = plan().days;
 
       [...dayPicker.children].forEach((button, index) => {
@@ -546,7 +544,7 @@
     }
 
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("sw.js?v=4").catch(() => {});
+      navigator.serviceWorker.register("sw.js?v=5").catch(() => {});
     }
   </script>
 </body>
