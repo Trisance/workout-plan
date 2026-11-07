@@ -498,20 +498,20 @@
       localStorage.setItem("workout-plan-v1", JSON.stringify(state));
     }
 
-    function monday(offset) {
+    function weekStart(offset) {
       const now = new Date();
       const day = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      day.setDate(day.getDate() - ((day.getDay() + 6) % 7) + offset * 7);
+      day.setDate(day.getDate() - day.getDay() + offset * 7);
       return day;
     }
 
     function weekIndex(offset) {
       const epoch = new Date(2024, 0, 1);
-      return Math.round((monday(offset).getTime() - epoch.getTime()) / (7 * 86400000));
+      return Math.round((weekStart(offset).getTime() - epoch.getTime()) / (7 * 86400000));
     }
 
     function formatRange(offset) {
-      const start = monday(offset);
+      const start = weekStart(offset);
       const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
       const options = { month: "short", day: "numeric" };
       return start.toLocaleDateString("en-US", options) + " – " + end.toLocaleDateString("en-US", options);
@@ -853,7 +853,7 @@
     }
 
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("sw.js?v=10").catch(() => {});
+      navigator.serviceWorker.register("sw.js?v=11").catch(() => {});
     }
   </script>
 </body>
