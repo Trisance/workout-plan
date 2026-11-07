@@ -247,7 +247,7 @@
   <div class="wrap">
     <h1 id="title">This week</h1>
     <p class="week-of" id="week-of"></p>
-    <p class="note">Tick Julian or Teja. Each person gets their own days, sets, and reps. Roll over saves this week as last week. Sets and reps stay different across last week, this week, and next week.</p>
+    <p class="note">Tick Julian or Teja. Each person gets their own days, sets, and reps. Save as previous week keeps this week so you can compare. Sets and reps stay different across the previous week, this week, and next week.</p>
 
     <section class="controls">
       <h2>Days at the gym</h2>
@@ -480,7 +480,7 @@
       const week = phase();
       document.getElementById("title").textContent = weekOffset === 0 ? "This week" : "Next week";
       document.getElementById("week-of").textContent = "Week of " + formatRange(weekOffset) +
-        (weekOffset === 0 && plan().lastWeek ? " · last week saved" : "");
+        (weekOffset === 0 && plan().lastWeek ? " · previous week saved" : "");
 
       syncingPerson = true;
       pickYou.checked = state.person === "you";
@@ -571,7 +571,7 @@
             current.textContent = scheme(exercise.current);
             const previous = document.createElement("div");
             previous.className = "last";
-            const lastBits = "Last week " + scheme(exercise.previous);
+            const lastBits = "Previous week " + scheme(exercise.previous);
             previous.textContent = exercise.previous.weight ? lastBits + " · " + exercise.previous.weight : lastBits;
             const weights = document.createElement("div");
             weights.className = "weights single";
@@ -611,17 +611,17 @@
         const roll = document.createElement("button");
         roll.type = "button";
         roll.className = "roll";
-        roll.textContent = "Roll over";
+        roll.textContent = "Save as previous week";
         roll.addEventListener("click", rollOver);
         const rollNote = document.createElement("p");
         rollNote.className = "roll-note";
-        rollNote.textContent = "Saves this week as last week, then fills in a new week.";
+        rollNote.textContent = "Saves this week as the previous week, then fills in a new week.";
         planList.append(roll, rollNote);
       }
     }
 
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("sw.js?v=7").catch(() => {});
+      navigator.serviceWorker.register("sw.js?v=8").catch(() => {});
     }
   </script>
 </body>
