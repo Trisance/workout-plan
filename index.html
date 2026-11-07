@@ -556,7 +556,7 @@
       const shift = person === "teja" ? 1 : 0;
       const visit = occurrence || 0;
       return {
-        sets: [3, 4, 5][mod(id + phase + shift + visit * 2, 3)],
+        sets: [2, 3, 4][mod(id + phase + shift + visit * 2, 3)],
         reps: [6, 7, 8, 9, 10, 11, 12][mod(id * 2 + phase + shift * 3 + visit * 3, 7)]
       };
     }
@@ -891,7 +891,7 @@
     }
 
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("sw.js?v=13").catch(() => {});
+      navigator.serviceWorker.register("sw.js?v=14").catch(() => {});
     }
   </script>
 </body>
