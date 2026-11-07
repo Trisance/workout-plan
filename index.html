@@ -521,23 +521,48 @@
       return ((value % size) + size) % size;
     }
 
-    function prescription(partIndex, slot, phase, person) {
+    function timesPerWeek(dayCount) {
+      return dayCount >= 5 ? 2 : 1;
+    }
+
+    function prescription(partIndex, slot, phase, person, occurrence) {
       const id = partIndex * 2 + slot;
       const shift = person === "teja" ? 1 : 0;
+      const visit = occurrence || 0;
       return {
-        sets: [3, 4, 5][mod(id + phase + shift, 3)],
-        reps: [6, 7, 8, 9, 10, 11, 12][mod(id * 2 + phase + shift * 3, 7)]
+        sets: [3, 4, 5][mod(id + phase + shift + visit * 2, 3)],
+        reps: [6, 7, 8, 9, 10, 11, 12][mod(id * 2 + phase + shift * 3 + visit * 3, 7)]
       };
+    }
+
+    function weekBuckets(phase, person, dayCount) {
+      const copies = timesPerWeek(dayCount);
+      const buckets = Array.from({ length: dayCount }, (_, index) => ({ day: index + 1, parts: [] }));
+      const order = partOrder(phase, person);
+      for (let copy = 0; copy < copies; copy++) {
+        const sequence = copy === 0 ? order : order.slice(4).concat(order.slice(0, 4));
+        sequence.forEach((partIndex) => {
+          let best = -1;
+          buckets.forEach((bucket, index) => {
+            if (bucket.parts.some((slot) => slot.partIndex === partIndex)) return;
+            if (best === -1 || bucket.parts.length < buckets[best].parts.length) best = index;
+          });
+          if (best === -1) return;
+          buckets[best].parts.push({ partIndex, occurrence: copy });
+        });
+      }
+      return buckets;
     }
 
     function phase() {
       return (Number(plan().roll) || 0) + weekOffset;
     }
 
-    function savedLast(exerciseId, partIndex, slot) {
-      const saved = plan().lastWeek && plan().lastWeek.exercises[exerciseId];
+    function savedLast(exerciseId, partIndex, slot, occurrence) {
+      const savedExercises = plan().lastWeek && plan().lastWeek.exercises;
+      const saved = savedExercises && (savedExercises[exerciseId + "#" + (occurrence || 0)] || savedExercises[exerciseId]);
       if (saved) return saved;
-      return prescription(partIndex, slot, plan().roll - 1, state.person);
+      return prescription(partIndex, slot, plan().roll - 1, state.person, occurrence || 0);
     }
 
     function scheme(item) {
@@ -560,35 +585,29 @@
       const exercises = {};
       const schedule = [];
       if (current.days) {
-        const ordered = partOrder(currentPhase, person);
-        const perDay = Math.floor(ordered.length / current.days);
-        let extra = ordered.length % current.days;
-        let cursor = 0;
-        for (let day = 1; day <= current.days; day++) {
-          const count = perDay + (extra > 0 ? 1 : 0);
-          if (extra > 0) extra -= 1;
-          const parts = ordered.slice(cursor, cursor + count).map((partIndex) => {
-            const part = PARTS[partIndex];
+        weekBuckets(currentPhase, person, current.days).forEach((bucket) => {
+          const parts = bucket.parts.map((slot) => {
+            const part = PARTS[slot.partIndex];
+            const visitKey = part.id + "|" + slot.occurrence;
             return {
               name: part.name,
-              done: !!done[part.id],
-              exercises: part.exercises.map((name, slot) => {
-                const id = part.id + "-" + (slot + 1);
-                const prescribed = prescription(partIndex, slot, currentPhase, person);
+              done: !!(done[visitKey] || (slot.occurrence === 0 && done[part.id])),
+              exercises: part.exercises.map((name, exerciseSlot) => {
+                const id = part.id + "-" + (exerciseSlot + 1);
+                const prescribed = prescription(slot.partIndex, exerciseSlot, currentPhase, person, slot.occurrence);
                 const record = {
                   name,
                   sets: prescribed.sets,
                   reps: prescribed.reps,
-                  weight: state.weights[weightKey(currentPhase, id, person)] || ""
+                  weight: state.weights[weightKey(currentPhase, id + "#" + slot.occurrence, person)] || state.weights[weightKey(currentPhase, id, person)] || ""
                 };
-                exercises[id] = record;
+                exercises[id + "#" + slot.occurrence] = record;
                 return record;
               })
             };
           });
-          schedule.push({ day, parts });
-          cursor += count;
-        }
+          schedule.push({ day: bucket.day, parts });
+        });
       }
       return {
         name: personName(person),
@@ -654,32 +673,23 @@
         return;
       }
 
-      const buckets = Array.from({ length: days }, (_, index) => ({
-        day: index + 1,
-        parts: []
-      }));
-      const ordered = partOrder(week, state.person);
-      const perDay = Math.floor(ordered.length / days);
-      let extra = ordered.length % days;
-      let cursor = 0;
-      buckets.forEach((bucket) => {
-        const count = perDay + (extra > 0 ? 1 : 0);
-        if (extra > 0) extra -= 1;
-        ordered.slice(cursor, cursor + count).forEach((partIndex) => {
-          const part = PARTS[partIndex];
-          bucket.parts.push({
+      const buckets = weekBuckets(week, state.person, days).map((bucket) => ({
+        day: bucket.day,
+        parts: bucket.parts.map((slot) => {
+          const part = PARTS[slot.partIndex];
+          return {
             id: part.id,
             name: part.name,
-            exercises: part.exercises.map((name, slot) => ({
-              id: part.id + "-" + (slot + 1),
+            occurrence: slot.occurrence,
+            exercises: part.exercises.map((name, exerciseSlot) => ({
+              id: part.id + "-" + (exerciseSlot + 1),
               name,
-              current: prescription(partIndex, slot, week, state.person),
-              previous: savedLast(part.id + "-" + (slot + 1), partIndex, slot)
+              current: prescription(slot.partIndex, exerciseSlot, week, state.person, slot.occurrence),
+              previous: savedLast(part.id + "-" + (exerciseSlot + 1), slot.partIndex, exerciseSlot, slot.occurrence)
             }))
-          });
-        });
-        cursor += count;
-      });
+          };
+        })
+      }));
 
       planList.replaceChildren();
       buckets.forEach((bucket) => {
@@ -696,7 +706,7 @@
           article.className = "part";
           article.dataset.part = part.id;
 
-          const doneKey = week + "|" + part.id;
+          const doneKey = week + "|" + part.id + "|" + part.occurrence;
           const head = document.createElement("div");
           head.className = "part-head";
           const title = document.createElement("h3");
@@ -744,9 +754,10 @@
             input.autocomplete = "off";
             input.placeholder = "Weight";
             const who = state.person;
-            input.value = state.weights[weightKey(week, exercise.id, who)] || "";
+            const liftKey = exercise.id + "#" + part.occurrence;
+            input.value = state.weights[weightKey(week, liftKey, who)] || "";
             input.addEventListener("input", () => {
-              const key = weightKey(week, exercise.id, who);
+              const key = weightKey(week, liftKey, who);
               if (input.value.trim()) state.weights[key] = input.value;
               else delete state.weights[key];
               save();
@@ -764,8 +775,9 @@
         planList.appendChild(section);
       });
 
+      const visits = timesPerWeek(days);
       summary.textContent = personName() + " · " + days + (days === 1 ? " gym day. " : " gym days. ") +
-        "8 body parts, two exercises each.";
+        "Each body part " + (visits === 1 ? "once" : "twice") + " this week.";
 
       if (weekOffset === 0) {
         const roll = document.createElement("button");
@@ -853,7 +865,7 @@
     }
 
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("sw.js?v=11").catch(() => {});
+      navigator.serviceWorker.register("sw.js?v=12").catch(() => {});
     }
   </script>
 </body>
