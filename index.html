@@ -80,6 +80,8 @@
       margin-top: 10px;
     }
 
+    .day-picker > *, .week-toggle > *, .names > * { min-width: 0; }
+
     .day-picker { grid-template-columns: repeat(6, 1fr); }
 
     .week-toggle, .names, .page-tabs { grid-template-columns: 1fr 1fr; }
@@ -254,6 +256,30 @@
     }
 
     .scale-card h2, .history-person h3 { text-transform: none; letter-spacing: 0; font-size: 18px; }
+
+    .scale-card .names label {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 0;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .scale-card input {
+      width: 100%;
+      min-width: 0;
+      max-width: 100%;
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 10px;
+      min-height: 42px;
+      padding: 8px 10px;
+    }
+
+    .day h2, .lift-name, .week-link, .history-person {
+      overflow-wrap: break-word;
+    }
 
     .foot {
       margin: 22px 0 0;
@@ -865,7 +891,7 @@
     }
 
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("sw.js?v=12").catch(() => {});
+      navigator.serviceWorker.register("sw.js?v=13").catch(() => {});
     }
   </script>
 </body>
