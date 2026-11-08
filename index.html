@@ -352,7 +352,7 @@
       <button type="button" id="tab-history">Previous weeks</button>
     </div>
     <p class="week-of" id="week-of"></p>
-    <p class="note" id="note">Tick Julian or Teja. Each person gets their own days, sets, and reps. Body parts move to different days each week. Up to three exercises cover a body part for the day, and that choice rotates each week. Save as previous week keeps the dates, scale weights, and what each person marked done.</p>
+    <p class="note" id="note">Tick Julian or Teja. Each person gets their own days, sets, and reps. Body parts move to different days each week. Two exercises cover a body part for the week, and the rest rotate in later. Save as previous week keeps the dates, scale weights, and what each person marked done.</p>
 
     <div id="planner">
     <section class="controls">
@@ -654,18 +654,20 @@
 
     function shownExerciseSlots(phase, person, partIndex, occurrence, dayCount) {
       const total = PARTS[partIndex].exercises.length;
-      if (total <= 3) return Array.from({ length: total }, (_, index) => index);
+      if (!total) return [];
       const start = mod(phase + (person === "teja" ? 1 : 0), total);
-      if (timesPerWeek(dayCount) < 2) return [0, 1, 2].map((step) => mod(start + step, total));
-      const span = Math.min(total, 6);
-      const firstCount = Math.min(3, span);
-      const offset = occurrence ? firstCount : 0;
-      const count = occurrence ? Math.min(3, Math.max(0, span - firstCount)) : firstCount;
-      return Array.from({ length: count }, (_, step) => mod(start + offset + step, total));
+      const firstCount = Math.min(2, total);
+      if (timesPerWeek(dayCount) < 2 || !occurrence) {
+        return Array.from({ length: firstCount }, (_, step) => mod(start + step, total));
+      }
+      const extra = Math.max(0, total - firstCount);
+      const count = Math.min(2, extra);
+      if (!count) return Array.from({ length: firstCount }, (_, step) => mod(start + step, total));
+      return Array.from({ length: count }, (_, step) => mod(start + firstCount + step, total));
     }
 
     function trainingOccurrence(partIndex, dayOccurrence) {
-      if (PARTS[partIndex].exercises.length <= 3) return dayOccurrence || 0;
+      if (PARTS[partIndex].exercises.length <= 2) return dayOccurrence || 0;
       return 0;
     }
 
@@ -1157,7 +1159,7 @@
     }
 
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("sw.js?v=43").catch(() => {});
+      navigator.serviceWorker.register("sw.js?v=44").catch(() => {});
     }
   </script>
 </body>
