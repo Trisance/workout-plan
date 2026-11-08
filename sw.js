@@ -1,4 +1,4 @@
-const CACHE = "week-plan-v51";
+const CACHE = "week-plan-v52";
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
