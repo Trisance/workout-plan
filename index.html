@@ -331,7 +331,7 @@
   <script>
     const PARTS = [
       { id: "chest", name: "Chest", days: { 1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1 }, exercises: ["Push-up", "Dumbbell bench press"] },
-      { id: "back", name: "Back", days: { 1: 1, 2: 1, 3: 2, 4: 2, 5: 2, 6: 2 }, exercises: ["Dumbbell row", "Lat pulldown"] },
+      { id: "back", name: "Back", days: { 1: 1, 2: 1, 3: 2, 4: 2, 5: 2, 6: 2 }, exercises: ["Incline dumbbell row", { name: "Superman stretch", hold: 10, reps: [4, 5, 6] }, "Seated cable row"] },
       { id: "shoulders", name: "Shoulders", days: { 1: 1, 2: 1, 3: 1, 4: 3, 5: 3, 6: 3 }, exercises: ["Dumbbell shoulder press", "Lateral raise"] },
       { id: "biceps", name: "Biceps", days: { 1: 1, 2: 1, 3: 2, 4: 2, 5: 4, 6: 4 }, exercises: ["Dumbbell curl", "Hammer curl"] },
       { id: "triceps", name: "Triceps", days: { 1: 1, 2: 1, 3: 1, 4: 1, 5: 4, 6: 5 }, exercises: ["Overhead extension", "Bench dip"] },
@@ -564,12 +564,31 @@
       return { sets: hangSets(phase, person, occurrence), hangs: 15 };
     }
 
+    function exerciseName(item) {
+      return typeof item === "string" ? item : item.name;
+    }
+
+    function exerciseKey(partIndex, slot) {
+      let count = slot;
+      for (let i = 0; i < partIndex; i++) count += PARTS[i].exercises.length;
+      return count;
+    }
+
     function prescription(partIndex, slot, phase, person, occurrence) {
-      const id = partIndex * 2 + slot;
+      const item = PARTS[partIndex].exercises[slot];
+      const id = exerciseKey(partIndex, slot);
       const shift = person === "teja" ? 1 : 0;
       const visit = occurrence || 0;
+      const sets = [2, 3, 4][mod(id + phase + shift + visit * 2, 3)];
+      if (item && item.reps) {
+        return {
+          sets,
+          reps: item.reps[mod(id * 2 + phase + shift + visit, item.reps.length)],
+          hold: item.hold
+        };
+      }
       return {
-        sets: [2, 3, 4][mod(id + phase + shift + visit * 2, 3)],
+        sets,
         reps: [6, 7, 8, 9, 10, 11, 12][mod(id * 2 + phase + shift * 3 + visit * 3, 7)]
       };
     }
@@ -619,12 +638,12 @@
 
     function scheme(item) {
       if (item.hangs) return item.sets + " sets · " + item.hangs + "s hangs";
+      if (item.hold) return item.sets + " sets · " + item.reps + " reps · " + item.hold + " sec holds";
       return item.sets + " sets · " + item.reps + " reps";
     }
 
     function effort(exercise) {
-      const work = exercise.hangs ? exercise.sets + " sets · " + exercise.hangs + "s hangs" : exercise.sets + " sets · " + exercise.reps + " reps";
-      return exercise.name + " · " + work + (exercise.weight ? " · " + exercise.weight + " lb" : "");
+      return exercise.name + " · " + scheme(exercise) + (exercise.weight ? " · " + exercise.weight + " lb" : "");
     }
 
     function weightKey(week, exerciseId, who) {
@@ -664,7 +683,8 @@
             return {
               name: part.name,
               done: !!(done[visitKey] || (slot.occurrence === 0 && done[part.id])),
-              exercises: part.exercises.map((name, exerciseSlot) => {
+              exercises: part.exercises.map((item, exerciseSlot) => {
+                const name = exerciseName(item);
                 const id = part.id + "-" + (exerciseSlot + 1);
                 const prescribed = prescription(slot.partIndex, exerciseSlot, currentPhase, person, slot.occurrence);
                 const record = {
@@ -673,6 +693,7 @@
                   reps: prescribed.reps,
                   weight: state.weights[weightKey(currentPhase, id + "#" + slot.occurrence, person)] || state.weights[weightKey(currentPhase, id, person)] || ""
                 };
+                if (prescribed.hold) record.hold = prescribed.hold;
                 exercises[id + "#" + slot.occurrence] = record;
                 return record;
               })
@@ -766,9 +787,9 @@
             id: part.id,
             name: part.name,
             occurrence: slot.occurrence,
-            exercises: part.exercises.map((name, exerciseSlot) => ({
+            exercises: part.exercises.map((item, exerciseSlot) => ({
               id: part.id + "-" + (exerciseSlot + 1),
-              name,
+              name: exerciseName(item),
               current: prescription(slot.partIndex, exerciseSlot, week, state.person, slot.occurrence),
               previous: savedLast(part.id + "-" + (exerciseSlot + 1), slot.partIndex, exerciseSlot, slot.occurrence)
             }))
@@ -978,7 +999,7 @@
     }
 
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("sw.js?v=17").catch(() => {});
+      navigator.serviceWorker.register("sw.js?v=18").catch(() => {});
     }
   </script>
 </body>
