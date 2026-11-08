@@ -352,7 +352,7 @@
       <button type="button" id="tab-history">Previous weeks</button>
     </div>
     <p class="week-of" id="week-of"></p>
-    <p class="note" id="note">Tick Julian or Teja. Each person gets their own days, sets, and reps. Body parts move to different days each week. Save as previous week keeps the dates, scale weights, and what each person marked done.</p>
+    <p class="note" id="note">Tick Julian or Teja. Each person gets their own days, sets, and reps. Body parts move to different days each week. Two exercises cover a body part for the day, and that pair rotates each week. Save as previous week keeps the dates, scale weights, and what each person marked done.</p>
 
     <div id="planner">
     <section class="controls">
@@ -652,6 +652,31 @@
       };
     }
 
+    function rotatedExerciseSlots(phase, person, partIndex) {
+      const count = PARTS[partIndex].exercises.length;
+      const items = Array.from({ length: count }, (_, index) => index);
+      let seed = mixSeed(partIndex + 41, person + "|moves") || 1;
+      for (let i = items.length - 1; i > 0; i--) {
+        seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+        const swap = seed % (i + 1);
+        const held = items[i];
+        items[i] = items[swap];
+        items[swap] = held;
+      }
+      if (!count) return items;
+      const turn = mod(phase + (person === "teja" ? 1 : 0), count);
+      return items.slice(turn).concat(items.slice(0, turn));
+    }
+
+    function shownExerciseSlots(phase, person, partIndex, occurrence) {
+      const count = PARTS[partIndex].exercises.length;
+      if (count <= 2) return Array.from({ length: count }, (_, index) => index);
+      const order = rotatedExerciseSlots(phase, person, partIndex);
+      const used = new Set(order.slice(0, (occurrence || 0) * 2));
+      const fresh = order.filter((index) => !used.has(index));
+      return fresh.slice(0, Math.min(2, 3));
+    }
+
     function weekBuckets(phase, person, dayCount) {
       const copies = timesPerWeek(dayCount);
       const buckets = Array.from({ length: dayCount }, (_, index) => ({ day: index + 1, parts: [] }));
@@ -772,10 +797,12 @@
             return {
               name: part.name,
               done: !!(done[visitKey] || (slot.occurrence === 0 && done[part.id])),
-              exercises: part.exercises.map((item, exerciseSlot) => {
+              exercises: shownExerciseSlots(currentPhase, person, slot.partIndex, slot.occurrence, current.days).map((exerciseSlot) => {
+                const item = part.exercises[exerciseSlot];
                 const name = exerciseName(item);
                 const id = part.id + "-" + (exerciseSlot + 1);
-                const prescribed = prescription(slot.partIndex, exerciseSlot, currentPhase, person, slot.occurrence);
+                const visit = slot.occurrence || 0;
+                const prescribed = prescription(slot.partIndex, exerciseSlot, currentPhase, person, visit);
                 const record = {
                   name,
                   reps: prescribed.reps,
@@ -783,7 +810,7 @@
                 };
                 if (prescribed.sets != null) record.sets = prescribed.sets;
                 if (prescribed.hold) record.hold = prescribed.hold;
-                exercises[id + "#" + slot.occurrence] = record;
+                exercises[id + "#" + visit] = record;
                 return record;
               })
             };
@@ -879,12 +906,16 @@
             id: part.id,
             name: part.name,
             occurrence: slot.occurrence,
-            exercises: part.exercises.map((item, exerciseSlot) => ({
-              id: part.id + "-" + (exerciseSlot + 1),
-              name: exerciseName(item),
-              current: prescription(slot.partIndex, exerciseSlot, week, state.person, slot.occurrence),
-              previous: savedLast(part.id + "-" + (exerciseSlot + 1), slot.partIndex, exerciseSlot, slot.occurrence)
-            }))
+            exercises: shownExerciseSlots(week, state.person, slot.partIndex, slot.occurrence, days).map((exerciseSlot) => {
+              const item = part.exercises[exerciseSlot];
+              const visit = slot.occurrence || 0;
+              return {
+                id: part.id + "-" + (exerciseSlot + 1),
+                name: exerciseName(item),
+                current: prescription(slot.partIndex, exerciseSlot, week, state.person, visit),
+                previous: savedLast(part.id + "-" + (exerciseSlot + 1), slot.partIndex, exerciseSlot, visit)
+              };
+            })
           };
         })
       }));
@@ -1134,7 +1165,7 @@
     }
 
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("sw.js?v=33").catch(() => {});
+      navigator.serviceWorker.register("sw.js?v=42").catch(() => {});
     }
   </script>
 </body>
