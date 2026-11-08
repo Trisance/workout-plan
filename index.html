@@ -335,7 +335,7 @@
       { id: "shoulders", name: "Shoulders", days: { 1: 1, 2: 1, 3: 1, 4: 3, 5: 3, 6: 3 }, exercises: ["Dumbbell shoulder press", "Lateral raise", "Overhead press", { name: "Shrugs", reps: [10, 11, 12, 13, 14, 15, 16] }, "Dumbbell shoulder flies"] },
       { id: "biceps", name: "Biceps", days: { 1: 1, 2: 1, 3: 2, 4: 2, 5: 4, 6: 4 }, exercises: ["Dumbbell curl", "Hammer curls", "Bicep curls"] },
       { id: "triceps", name: "Triceps", days: { 1: 1, 2: 1, 3: 1, 4: 1, 5: 4, 6: 5 }, exercises: ["Overhead extension", "Bench dip"] },
-      { id: "quads", name: "Quads", days: { 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6 }, exercises: ["Goblet squat", "Lunge"] },
+      { id: "quads", name: "Quads", days: { 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6 }, exercises: ["Kettlebell squats", "Weighted lunges with one foot raised on a bench", { name: "Wall sits", hold: 30, reps: [2, 3, 4], noSets: true }] },
       { id: "hamstrings", name: "Hamstrings", days: { 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6 }, exercises: ["Romanian deadlift", "Leg curl"] },
       { id: "core", name: "Core", days: { 1: 1, 2: 2, 3: 3, 4: 3, 5: 3, 6: 4 }, exercises: ["Sit-up", "Leg raise"] }
     ];
@@ -581,11 +581,12 @@
       const visit = occurrence || 0;
       const sets = [2, 3, 4][mod(id + phase + shift + visit * 2, 3)];
       if (item && item.reps) {
-        return {
-          sets,
+        const planned = {
           reps: item.reps[mod(id * 2 + phase + shift + visit, item.reps.length)],
           hold: item.hold
         };
+        if (!item.noSets) planned.sets = sets;
+        return planned;
       }
       return {
         sets,
@@ -638,6 +639,7 @@
 
     function scheme(item) {
       if (item.hangs) return item.sets + " sets · " + item.hangs + "s hangs";
+      if (item.hold && item.sets == null) return item.reps + " reps · " + item.hold + " sec holds";
       if (item.hold) return item.sets + " sets · " + item.reps + " reps · " + item.hold + " sec holds";
       return item.sets + " sets · " + item.reps + " reps";
     }
@@ -689,10 +691,10 @@
                 const prescribed = prescription(slot.partIndex, exerciseSlot, currentPhase, person, slot.occurrence);
                 const record = {
                   name,
-                  sets: prescribed.sets,
                   reps: prescribed.reps,
                   weight: state.weights[weightKey(currentPhase, id + "#" + slot.occurrence, person)] || state.weights[weightKey(currentPhase, id, person)] || ""
                 };
+                if (prescribed.sets != null) record.sets = prescribed.sets;
                 if (prescribed.hold) record.hold = prescribed.hold;
                 exercises[id + "#" + slot.occurrence] = record;
                 return record;
@@ -999,7 +1001,7 @@
     }
 
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("sw.js?v=22").catch(() => {});
+      navigator.serviceWorker.register("sw.js?v=23").catch(() => {});
     }
   </script>
 </body>
