@@ -248,6 +248,27 @@
       padding: 12px 14px;
     }
 
+    .week-link[aria-expanded="true"] {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: var(--accent-ink);
+    }
+
+    .week-list {
+      margin-top: 18px;
+      min-width: 0;
+    }
+
+    .week-list-title {
+      margin: 0;
+      font-size: 13px;
+      font-weight: 650;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .week-panel { margin-top: 8px; }
+
     .back {
       margin-top: 0;
       background: #fff;
@@ -1273,8 +1294,11 @@
       history.replaceChildren();
       const workouts = historyWorkouts();
       if (!historyMonth) {
-        const newest = workouts.values().next().value;
-        const basis = newest ? newest.date : new Date();
+        let basis = null;
+        workouts.forEach((item) => {
+          if (!basis || item.date > basis) basis = item.date;
+        });
+        if (!basis) basis = new Date();
         historyMonth = new Date(basis.getFullYear(), basis.getMonth(), 1);
       }
       if (selectedHistoryDate && !workouts.has(selectedHistoryDate)) selectedHistoryDate = "";
@@ -1354,10 +1378,93 @@
       detail.setAttribute("aria-live", "polite");
       renderHistoryDay(detail, workouts.get(selectedHistoryDate) || null, workouts.size > 0);
       history.append(calendar, detail);
+      renderHistoryList(history);
+    }
+
+    function historyDoneCount(person) {
+      return (person.schedule || []).reduce((sum, day) => sum + ((day && day.parts) || []).filter((part) => part.done).length, 0);
+    }
+
+    function renderHistoryWeek(card, person) {
+      const title = document.createElement("h3");
+      title.textContent = person.name || personName();
+      const scale = document.createElement("p");
+      scale.textContent = person.scale ? "Scale weight " + person.scale + " lb" : "Scale weight not entered";
+      card.append(title, scale);
+      if (!person.schedule || !person.schedule.length) {
+        const empty = document.createElement("p");
+        empty.className = "last";
+        empty.textContent = "No gym days were selected.";
+        card.appendChild(empty);
+        return;
+      }
+      person.schedule.forEach((day) => {
+        if (day && day.day) {
+          const dayHeading = document.createElement("h3");
+          dayHeading.textContent = "Day " + day.day;
+          card.appendChild(dayHeading);
+        }
+        (day.parts || []).forEach((part) => {
+          const heading = document.createElement("h3");
+          heading.textContent = part.name + (part.done ? " · done" : " · not done");
+          card.appendChild(heading);
+          (part.exercises || []).forEach((exercise) => {
+            const line = document.createElement("p");
+            line.className = "scheme";
+            line.textContent = effort(exercise);
+            card.appendChild(line);
+          });
+        });
+        const savedNote = String(day && day.note || "").trim().slice(0, 500);
+        if (savedNote) {
+          const saved = document.createElement("div");
+          saved.className = "own-saved";
+          const savedLabel = document.createElement("div");
+          savedLabel.className = "own-hint";
+          savedLabel.textContent = "Your own workout";
+          const savedBody = document.createElement("div");
+          savedBody.textContent = savedNote;
+          saved.append(savedLabel, savedBody);
+          card.appendChild(saved);
+        }
+      });
+    }
+
+    function renderHistoryList(history) {
+      const weeks = state.archive.filter((entry) => historySnapshot(entry)).slice().sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0));
+      if (!weeks.length) return;
+      const list = document.createElement("section");
+      list.className = "week-list";
+      const heading = document.createElement("h2");
+      heading.className = "week-list-title";
+      heading.textContent = "Saved weeks";
+      list.appendChild(heading);
+      weeks.forEach((entry, index) => {
+        const person = historySnapshot(entry);
+        const weekId = entry.id != null ? entry.id : index;
+        const open = openWeek === weekId;
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "week-link";
+        button.setAttribute("aria-expanded", String(open));
+        const scale = String(person.scale || "").trim();
+        button.textContent = entry.range + " — " + (person.name || personName()) + (scale ? " " + scale + " lb" : "") + " · " + historyDoneCount(person) + " done";
+        button.addEventListener("click", () => {
+          openWeek = open ? null : weekId;
+          render();
+        });
+        list.appendChild(button);
+        if (!open) return;
+        const panel = document.createElement("article");
+        panel.className = "part history-person week-panel";
+        renderHistoryWeek(panel, person);
+        list.appendChild(panel);
+      });
+      history.appendChild(list);
     }
 
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("sw.js?v=53").catch(() => {});
+      navigator.serviceWorker.register("sw.js?v=54").catch(() => {});
     }
   </script>
 </body>
