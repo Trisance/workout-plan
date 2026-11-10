@@ -337,6 +337,94 @@
       overflow-wrap: anywhere;
     }
 
+    .calendar, .day-detail {
+      margin-top: 16px;
+      padding: 14px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+      min-width: 0;
+    }
+
+    .day-detail { margin-top: 12px; }
+
+    .calendar-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .calendar-title {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 650;
+      text-align: center;
+    }
+
+    .calendar-head button {
+      min-width: 64px;
+      min-height: 42px;
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 10px;
+      cursor: pointer;
+    }
+
+    .calendar-grid {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+      gap: 4px;
+      margin-top: 10px;
+    }
+
+    .calendar-grid > * { min-width: 0; }
+
+    .calendar-weekday, .calendar-pad, .calendar-day {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 36px;
+      border-radius: 8px;
+      text-align: center;
+    }
+
+    .calendar-weekday {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .calendar-day {
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      padding: 0;
+    }
+
+    button.calendar-day {
+      background: var(--soft);
+      color: var(--accent);
+      font-weight: 650;
+      cursor: pointer;
+    }
+
+    button.calendar-day[aria-pressed="true"] {
+      background: var(--accent);
+      color: var(--accent-ink);
+    }
+
+    .day-detail h3 {
+      margin: 12px 0 0;
+      font-size: 16px;
+      text-transform: none;
+      letter-spacing: 0;
+    }
+
+    .day-detail p { margin: 4px 0 0; }
+
+    .day-detail h3:first-child { margin-top: 0; }
+
     .foot {
       margin: 22px 0 0;
       font-size: 13px;
@@ -439,6 +527,8 @@
     const tabHistory = document.getElementById("tab-history");
     let screen = "plan";
     let openWeek = null;
+    let historyMonth = null;
+    let selectedHistoryDate = "";
     forgetStoredName();
 
     for (let day = 1; day <= 6; day++) {
@@ -599,6 +689,29 @@
       const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
       const options = { month: "short", day: "numeric" };
       return start.toLocaleDateString("en-US", options) + " – " + end.toLocaleDateString("en-US", options);
+    }
+
+    function isoDate(date) {
+      return date.getFullYear() + "-" + String(date.getMonth() + 1).padStart(2, "0") + "-" + String(date.getDate()).padStart(2, "0");
+    }
+
+    function dateFromIso(value) {
+      const parts = String(value || "").split("-");
+      if (parts.length !== 3) return null;
+      const year = Number(parts[0]);
+      const month = Number(parts[1]) - 1;
+      const day = Number(parts[2]);
+      const date = new Date(year, month, day);
+      if (Number.isNaN(date.getTime()) || date.getFullYear() !== year || date.getMonth() !== month || date.getDate() !== day) return null;
+      return date;
+    }
+
+    function weekStartFromId(id) {
+      const savedAt = new Date(id);
+      if (Number.isNaN(savedAt.getTime())) return null;
+      const start = new Date(savedAt.getFullYear(), savedAt.getMonth(), savedAt.getDate());
+      start.setDate(start.getDate() - start.getDay());
+      return start;
     }
 
     function mod(value, size) {
@@ -781,6 +894,7 @@
       });
       const exercises = {};
       const schedule = [];
+      const sunday = weekStart(0);
       if (current.days) {
         weekBuckets(currentPhase, person, current.days).forEach((bucket) => {
           const parts = bucket.parts.map((slot) => {
@@ -821,7 +935,8 @@
               })
             };
           });
-          const dayRecord = { day: bucket.day, parts };
+          const dayDate = new Date(sunday.getFullYear(), sunday.getMonth(), sunday.getDate() + bucket.day - 1);
+          const dayRecord = { day: bucket.day, date: isoDate(dayDate), parts };
           const ownNote = noteText(currentPhase, bucket.day, person);
           if (ownNote) dayRecord.note = ownNote;
           schedule.push(dayRecord);
@@ -857,8 +972,8 @@
       document.getElementById("history").hidden = screen === "plan";
       document.getElementById("note").hidden = screen !== "plan";
       if (screen !== "plan") {
-        document.getElementById("title").textContent = openWeek ? "Saved week" : "Previous weeks";
-        document.getElementById("week-of").textContent = openWeek ? "Week of " + openWeek.range : "Tap a week to see what " + personName() + " finished.";
+        document.getElementById("title").textContent = "Previous weeks";
+        document.getElementById("week-of").textContent = "Select one day to see " + personName() + "'s workout.";
         renderHistory();
         return;
       }
@@ -1081,97 +1196,168 @@
       return person;
     }
 
-    function historyDoneCount(person) {
-      return (person.schedule || []).reduce((sum, day) => sum + ((day && day.parts) || []).filter((part) => part.done).length, 0);
+    function historyWorkouts() {
+      const byDate = new Map();
+      state.archive.forEach((entry) => {
+        const person = historySnapshot(entry);
+        if (!person) return;
+        const start = weekStartFromId(entry.id);
+        (person.schedule || []).forEach((day) => {
+          if (!day || !Array.isArray(day.parts) || !day.parts.length) return;
+          const dated = dateFromIso(day.date);
+          const fallback = start && Number(day.day) >= 1
+            ? new Date(start.getFullYear(), start.getMonth(), start.getDate() + Number(day.day) - 1)
+            : null;
+          const date = dated || fallback;
+          if (!date || Number.isNaN(date.getTime())) return;
+          const iso = isoDate(date);
+          if (byDate.has(iso)) return;
+          byDate.set(iso, {
+            iso,
+            date,
+            day,
+            range: entry.range || "",
+            scale: String(person.scale || "").trim()
+          });
+        });
+      });
+      return byDate;
     }
 
-    function renderHistoryPerson(history, person) {
-      const card = document.createElement("article");
-      card.className = "part history-person";
-      const title = document.createElement("h3");
-      title.textContent = person.name || personName();
-      const scale = document.createElement("p");
-      scale.textContent = person.scale ? "Scale weight " + person.scale + " lb" : "Scale weight not entered";
-      card.append(title, scale);
-      if (!person.schedule || !person.schedule.length) {
-        const empty = document.createElement("p");
-        empty.className = "last";
-        empty.textContent = "No gym days were selected.";
-        card.appendChild(empty);
-      } else {
-        person.schedule.forEach((day) => {
-          (day.parts || []).forEach((part) => {
-            const heading = document.createElement("h3");
-            heading.textContent = part.name + (part.done ? " · done" : " · not done");
-            card.appendChild(heading);
-            (part.exercises || []).forEach((exercise) => {
-              const line = document.createElement("p");
-              line.className = "scheme";
-              line.textContent = effort(exercise);
-              card.appendChild(line);
-            });
-          });
-          const savedNote = String(day && day.note || "").trim().slice(0, 500);
-          if (savedNote) {
-            const saved = document.createElement("div");
-            saved.className = "own-saved";
-            const savedLabel = document.createElement("div");
-            savedLabel.className = "own-hint";
-            savedLabel.textContent = day && day.day ? "Day " + day.day + " · your own workout" : "Your own workout";
-            const savedBody = document.createElement("div");
-            savedBody.textContent = savedNote;
-            saved.append(savedLabel, savedBody);
-            card.appendChild(saved);
-          }
-        });
+    function renderHistoryDay(box, item, hasAny) {
+      box.replaceChildren();
+      if (!item) {
+        const hint = document.createElement("p");
+        hint.className = "last";
+        hint.textContent = hasAny
+          ? "Select a day to see that workout."
+          : "No previous weeks yet. Save this week and it will show up here.";
+        box.appendChild(hint);
+        return;
       }
-      history.appendChild(card);
+      const title = document.createElement("h3");
+      title.textContent = item.date.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
+      const meta = document.createElement("p");
+      meta.className = "last";
+      meta.textContent = "Day " + item.day.day + (item.range ? " · Week of " + item.range : "");
+      const scale = document.createElement("p");
+      scale.textContent = item.scale ? "Scale weight " + item.scale + " lb" : "Scale weight not entered";
+      box.append(title, meta, scale);
+      (item.day.parts || []).forEach((part) => {
+        const heading = document.createElement("h3");
+        heading.textContent = part.name + (part.done ? " · done" : " · not done");
+        box.appendChild(heading);
+        (part.exercises || []).forEach((exercise) => {
+          const line = document.createElement("p");
+          line.className = "scheme";
+          line.textContent = effort(exercise);
+          box.appendChild(line);
+        });
+      });
+      const savedNote = String(item.day.note || "").trim().slice(0, 500);
+      if (savedNote) {
+        const saved = document.createElement("div");
+        saved.className = "own-saved";
+        const savedLabel = document.createElement("div");
+        savedLabel.className = "own-hint";
+        savedLabel.textContent = "Your own workout";
+        const savedBody = document.createElement("div");
+        savedBody.textContent = savedNote;
+        saved.append(savedLabel, savedBody);
+        box.appendChild(saved);
+      }
     }
 
     function renderHistory() {
       const history = document.getElementById("history");
       history.replaceChildren();
-      if (openWeek) {
-        const back = document.createElement("button");
-        back.type = "button";
-        back.className = "roll back";
-        back.textContent = "All previous weeks";
-        back.addEventListener("click", () => {
-          openWeek = null;
-          render();
-        });
-        history.appendChild(back);
-        const person = historySnapshot(openWeek);
-        if (person) renderHistoryPerson(history, person);
-        return;
+      const workouts = historyWorkouts();
+      if (!historyMonth) {
+        const newest = workouts.values().next().value;
+        const basis = newest ? newest.date : new Date();
+        historyMonth = new Date(basis.getFullYear(), basis.getMonth(), 1);
       }
+      if (selectedHistoryDate && !workouts.has(selectedHistoryDate)) selectedHistoryDate = "";
 
-      const weeks = state.archive.filter((entry) => historySnapshot(entry));
-      if (!weeks.length) {
-        const empty = document.createElement("p");
-        empty.className = "summary";
-        empty.textContent = "No previous weeks yet. Save this week and it will show up here.";
-        history.appendChild(empty);
-        return;
-      }
+      const calendar = document.createElement("section");
+      calendar.className = "calendar";
+      const head = document.createElement("div");
+      head.className = "calendar-head";
+      const prev = document.createElement("button");
+      prev.type = "button";
+      prev.textContent = "Prev";
+      prev.setAttribute("aria-label", "Previous month");
+      prev.addEventListener("click", () => {
+        historyMonth = new Date(historyMonth.getFullYear(), historyMonth.getMonth() - 1, 1);
+        render();
+      });
+      const title = document.createElement("h2");
+      title.className = "calendar-title";
+      title.textContent = historyMonth.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+      const next = document.createElement("button");
+      next.type = "button";
+      next.textContent = "Next";
+      next.setAttribute("aria-label", "Next month");
+      next.addEventListener("click", () => {
+        historyMonth = new Date(historyMonth.getFullYear(), historyMonth.getMonth() + 1, 1);
+        render();
+      });
+      head.append(prev, title, next);
 
-      weeks.forEach((entry) => {
-        const person = historySnapshot(entry);
+      const grid = document.createElement("div");
+      grid.className = "calendar-grid";
+      ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].forEach((label) => {
+        const weekday = document.createElement("div");
+        weekday.className = "calendar-weekday";
+        weekday.textContent = label;
+        grid.appendChild(weekday);
+      });
+      const year = historyMonth.getFullYear();
+      const month = historyMonth.getMonth();
+      const startPad = new Date(year, month, 1).getDay();
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
+      const total = Math.ceil((startPad + daysInMonth) / 7) * 7;
+      for (let index = 0; index < total; index++) {
+        const dayNumber = index - startPad + 1;
+        if (dayNumber < 1 || dayNumber > daysInMonth) {
+          const pad = document.createElement("div");
+          pad.className = "calendar-pad";
+          grid.appendChild(pad);
+          continue;
+        }
+        const date = new Date(year, month, dayNumber);
+        const iso = isoDate(date);
+        const item = workouts.get(iso);
+        if (!item) {
+          const quiet = document.createElement("div");
+          quiet.className = "calendar-day";
+          quiet.textContent = String(dayNumber);
+          grid.appendChild(quiet);
+          continue;
+        }
         const button = document.createElement("button");
         button.type = "button";
-        button.className = "week-link";
-        const scale = String(person.scale || "").trim();
-        button.textContent = entry.range + " — " + (person.name || personName()) + (scale ? " " + scale + " lb" : "") + " · " + historyDoneCount(person) + " done";
+        button.className = "calendar-day";
+        button.textContent = String(dayNumber);
+        button.setAttribute("aria-pressed", String(iso === selectedHistoryDate));
+        button.setAttribute("aria-label", date.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" }));
         button.addEventListener("click", () => {
-          openWeek = entry;
+          selectedHistoryDate = iso;
           render();
         });
-        history.appendChild(button);
-      });
+        grid.appendChild(button);
+      }
+      calendar.append(head, grid);
+
+      const detail = document.createElement("section");
+      detail.className = "day-detail";
+      detail.setAttribute("aria-live", "polite");
+      renderHistoryDay(detail, workouts.get(selectedHistoryDate) || null, workouts.size > 0);
+      history.append(calendar, detail);
     }
 
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("sw.js?v=52").catch(() => {});
+      navigator.serviceWorker.register("sw.js?v=53").catch(() => {});
     }
   </script>
 </body>
