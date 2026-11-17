@@ -987,18 +987,43 @@
       });
     }
 
-    function placeOnce(buckets, dayIndexes, partIndex, phase, person, salt) {
-      if (!dayIndexes || !dayIndexes.length) return;
-      const pick = dayIndexes[mixSeed(phase + 3, person + "|" + salt) % dayIndexes.length];
-      buckets[pick].parts.push({ partIndex, occurrence: 0, visitSize: 1 });
+    function legTotal(phase, person, dayIndex) {
+      const shift = person === "teja" ? 1 : 0;
+      return 5 + mod(phase + shift + (dayIndex || 0), 2);
     }
 
-    function legQuota(indexOf) {
-      return [
-        { partIndex: indexOf.quads, count: 3 },
-        { partIndex: indexOf.hamstrings, count: 2 },
+    function placeLegDays(buckets, dayIndexes, phase, person, indexOf, dayCount) {
+      const days = dayIndexes || [];
+      if (!days.length) return;
+      if ((dayCount || days.length) >= 3) {
+        const calfDay = days[mixSeed(phase + 3, person + "|calf") % days.length];
+        days.forEach((day, dayIndex) => {
+          const total = legTotal(phase, person, dayIndex);
+          const calf = day === calfDay ? 1 : 0;
+          const hams = Math.min(2, PARTS[indexOf.hamstrings].exercises.length);
+          let quads = total - hams - calf;
+          const quadMax = PARTS[indexOf.quads].exercises.length;
+          if (quads > quadMax) quads = quadMax;
+          if (quads < 0) quads = 0;
+          const items = [];
+          if (quads) items.push({ partIndex: indexOf.quads, occurrence: dayIndex, visitSize: quads });
+          if (hams) items.push({ partIndex: indexOf.hamstrings, occurrence: dayIndex, visitSize: hams });
+          if (calf) items.push({ partIndex: indexOf.calves, occurrence: 0, visitSize: 1 });
+          shuffleItems(items, phase, person, "legs" + day).forEach((item) => {
+            buckets[day].parts.push(item);
+          });
+        });
+        return;
+      }
+      const total = legTotal(phase, person, 0);
+      const hams = Math.min(2, PARTS[indexOf.hamstrings].exercises.length);
+      const quadMax = PARTS[indexOf.quads].exercises.length;
+      let quads = Math.min(quadMax, Math.max(0, total - hams - 1));
+      placeBudget(buckets, days, [
+        { partIndex: indexOf.quads, count: quads },
+        { partIndex: indexOf.hamstrings, count: hams },
         { partIndex: indexOf.calves, count: 1 }
-      ];
+      ], phase, person, "legs");
     }
 
     function armQuota(indexOf) {
@@ -1089,23 +1114,16 @@
         if (focus.back) parts.push(indexOf.back);
         if (focus.shoulders) parts.push(indexOf.shoulders);
         if (focus.arms) parts.push(indexOf.biceps, indexOf.triceps);
-        if (focus.legs) parts.push(indexOf.quads, indexOf.hamstrings, indexOf.calves);
         place("all", parts);
+        if (focus.legs) placeLegDays(buckets, homes.all, phase, person, indexOf, dayCount);
       } else if (dayCount === 2 && groups.includes("legs") && groups.length > 1) {
-        place("legs", [indexOf.quads, indexOf.hamstrings]);
-        placeOnce(buckets, homes.legs, indexOf.calves, phase, person, "calf");
+        placeLegDays(buckets, homes.legs, phase, person, indexOf, dayCount);
         const mixed = [];
         if (focus.arms) mixed.push(indexOf.biceps, indexOf.triceps);
         mixed.push(...upper);
         place("mixed", mixed);
       } else {
-        if (focus.legs) {
-          if (dayCount >= 3) placeBudget(buckets, homes.legs, legQuota(indexOf), phase, person, "legs");
-          else {
-            place("legs", [indexOf.quads, indexOf.hamstrings]);
-            placeOnce(buckets, homes.legs, indexOf.calves, phase, person, "calf");
-          }
-        }
+        if (focus.legs) placeLegDays(buckets, homes.legs, phase, person, indexOf, dayCount);
         if (focus.arms) {
           if (dayCount >= 3) placeBudget(buckets, homes.arms, armQuota(indexOf), phase, person, "arms");
           else place("arms", [indexOf.biceps, indexOf.triceps]);
@@ -1134,7 +1152,11 @@
       PARTS.forEach((part, index) => { indexOf[part.id] = index; });
       if (focusActive(person, phase)) return focusedBuckets(phase, person, dayCount, indexOf);
       if (dayCount === 1) {
-        PARTS.forEach((_, partIndex) => buckets[0].parts.push({ partIndex, occurrence: 0 }));
+        PARTS.forEach((part, partIndex) => {
+          if (part.id === "quads" || part.id === "hamstrings" || part.id === "calves") return;
+          buckets[0].parts.push({ partIndex, occurrence: 0 });
+        });
+        placeLegDays(buckets, [0], phase, person, indexOf, dayCount);
         buckets[0].parts.push({ fingerboard: true, occurrence: 0 });
         return buckets;
       }
@@ -1197,12 +1219,11 @@
       }
 
       if (dayCount >= 3) {
-        placeBudget(buckets, homes.legs, legQuota(indexOf), phase, person, "legs");
+        placeLegDays(buckets, homes.legs, phase, person, indexOf, dayCount);
         placeBudget(buckets, homes.arms, armQuota(indexOf), phase, person, "arms");
         place("upper", [indexOf.chest, indexOf.back, indexOf.shoulders]);
       } else {
-        place("legs", [indexOf.quads, indexOf.hamstrings]);
-        placeOnce(buckets, homes.legs, indexOf.calves, phase, person, "calf");
+        placeLegDays(buckets, homes.legs, phase, person, indexOf, dayCount);
         place("mixed", [indexOf.chest, indexOf.back, indexOf.shoulders, indexOf.biceps, indexOf.triceps]);
       }
 
@@ -1563,12 +1584,12 @@
       const coverage = focused
         ? "Focused on " + focusNames.join(", ") + ". "
         : days === 1
-          ? "One exercise for each body part, including calf raises. "
+          ? "One exercise for each body part. Legs are 5 or 6 exercises, with calf raises. "
           : days === 2
-            ? "Two exercises for each body part. Legs are one quad, one hamstring, and calf raises. "
+            ? "Two exercises for each body part. Legs are 5 or 6 exercises, with calf raises. "
             : days <= 4
-              ? "Chest, back, shoulders, and core have 3 exercises. Arms are 2 biceps and 2 triceps. Legs are 6 exercises, with calf raises once. "
-              : "Chest, back, shoulders, and core are twice, with 3 exercises at 3 sets. Arms are 2 biceps and 2 triceps. Legs are 6 exercises, with calf raises once. ";
+              ? "Chest, back, shoulders, and core have 3 exercises. Arms are 2 biceps and 2 triceps. Each leg day has 5 or 6 exercises, with calf raises once. "
+              : "Chest, back, shoulders, and core are twice, with 3 exercises at 3 sets. Arms are 2 biceps and 2 triceps. Each leg day has 5 or 6 exercises, with calf raises once. ";
       summary.textContent = personName() + " · " + days + (days === 1 ? " gym day. " : " gym days. ") +
         coverage + "Fingerboard " + (hangs === 1 ? "once." : "on 2 days.");
 
@@ -1938,7 +1959,7 @@
     }
 
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("sw.js?v=62").catch(() => {});
+      navigator.serviceWorker.register("sw.js?v=63").catch(() => {});
     }
   </script>
 </body>
