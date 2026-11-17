@@ -855,40 +855,29 @@
       return items.slice(turn).concat(items.slice(0, turn));
     }
 
-    function exerciseCap(partId) {
-      if (partId === "biceps" || partId === "triceps" || partId === "core") return 2;
-      return 3;
+    function takeWindow(order, start, size) {
+      const slots = [];
+      const seen = new Set();
+      const count = order.length;
+      const wanted = Math.min(size, count);
+      for (let step = 0; slots.length < wanted && step < count; step++) {
+        const slot = order[mod((start || 0) + step, count)];
+        if (seen.has(slot)) break;
+        seen.add(slot);
+        slots.push(slot);
+      }
+      return slots;
     }
 
     function shownExerciseSlots(phase, person, partIndex, occurrence, dayCount, visitSize) {
       const count = PARTS[partIndex].exercises.length;
       if (!count) return [];
       const order = rotatedExerciseSlots(phase, person, partIndex);
-      if (visitSize) {
-        const slots = [];
-        const seen = new Set();
-        const size = Math.min(visitSize, count);
-        for (let step = 0; slots.length < size && step < count; step++) {
-          const slot = order[mod((occurrence || 0) + step, count)];
-          if (seen.has(slot)) break;
-          seen.add(slot);
-          slots.push(slot);
-        }
-        return slots;
-      }
+      if (visitSize) return takeWindow(order, occurrence, visitSize);
       const leg = PARTS[partIndex].id === "quads" || PARTS[partIndex].id === "hamstrings";
       if (dayCount === 1 || (dayCount === 2 && leg)) return order.slice(0, 1);
       if (dayCount === 2) return order.slice(0, Math.min(2, count));
-      if (dayCount === 3 || dayCount === 4) return order.slice(0, Math.min(exerciseCap(PARTS[partIndex].id), count));
-      if (dayCount >= 5) {
-        const oneArmDay = dayCount === 5 && (PARTS[partIndex].id === "biceps" || PARTS[partIndex].id === "triceps");
-        if (oneArmDay) return order.slice(0, Math.min(2, count));
-        return [order[Math.min(occurrence || 0, count - 1)]];
-      }
-      if (count <= 2) return Array.from({ length: count }, (_, index) => index);
-      const used = new Set(order.slice(0, (occurrence || 0) * 2));
-      const fresh = order.filter((index) => !used.has(index));
-      return fresh.slice(0, 2);
+      return takeWindow(order, occurrence, 3);
     }
 
     function trainingOccurrence(partIndex, dayOccurrence) {
@@ -925,15 +914,14 @@
       return Object.keys(focus).some((name) => focus[name]);
     }
 
-    function visitSizeFor(dayCount, partIndex, groupDayCount) {
+    function visitSizeFor(dayCount, partIndex) {
       const count = PARTS[partIndex].exercises.length;
       const id = PARTS[partIndex].id;
       const leg = id === "quads" || id === "hamstrings";
       if (!count) return 0;
       if (dayCount === 1 || (dayCount === 2 && leg)) return 1;
       if (dayCount === 2) return Math.min(2, count);
-      if (dayCount <= 4) return Math.min(exerciseCap(id), count);
-      return Math.min(groupDayCount <= 1 ? 2 : 1, count);
+      return Math.min(3, count);
     }
 
     function focusedBuckets(phase, person, dayCount, indexOf) {
@@ -1482,8 +1470,8 @@
           : days === 2
             ? "Two exercises for each body part, and 2 for legs. "
             : days <= 4
-              ? "Each body part once. Three exercises, except two for biceps, triceps, and core. "
-              : "Each body part twice. Two exercises at 3 sets each. ";
+              ? "Each body part once, with 3 exercises. "
+              : "Each body part twice, with 3 exercises at 3 sets. ";
       summary.textContent = personName() + " · " + days + (days === 1 ? " gym day. " : " gym days. ") +
         coverage + "Fingerboard " + (hangs === 1 ? "once." : "on 2 days.");
 
@@ -1853,7 +1841,7 @@
     }
 
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("sw.js?v=60").catch(() => {});
+      navigator.serviceWorker.register("sw.js?v=61").catch(() => {});
     }
   </script>
 </body>
