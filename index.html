@@ -461,7 +461,7 @@
       <button type="button" id="tab-history">Previous weeks</button>
     </div>
     <p class="week-of" id="week-of"></p>
-    <p class="note" id="note">Tick Julian or Teja. Each person gets their own days, sets, and reps. Body parts move to different days each week. Two exercises cover a body part for the day, and that pair rotates each week. Save as previous week keeps the dates, scale weights, and what each person marked done.</p>
+    <p class="note" id="note">Tick Julian or Teja. Each person gets their own days, sets, and reps. One gym day is one exercise per body part and two for legs. Two gym days are two exercises per body part and two for legs. Body parts move to different days each week. Save as previous week keeps the dates, scale weights, and what each person marked done.</p>
 
     <div id="planner">
     <section class="controls">
@@ -802,11 +802,14 @@
       return items.slice(turn).concat(items.slice(0, turn));
     }
 
-    function shownExerciseSlots(phase, person, partIndex, occurrence) {
+    function shownExerciseSlots(phase, person, partIndex, occurrence, dayCount) {
       const count = PARTS[partIndex].exercises.length;
       if (!count) return [];
-      if (count <= 2) return Array.from({ length: count }, (_, index) => index);
       const order = rotatedExerciseSlots(phase, person, partIndex);
+      const leg = PARTS[partIndex].id === "quads" || PARTS[partIndex].id === "hamstrings";
+      if (dayCount === 1 || (dayCount === 2 && leg)) return order.slice(0, 1);
+      if (dayCount === 2) return order.slice(0, Math.min(2, count));
+      if (count <= 2) return Array.from({ length: count }, (_, index) => index);
       const used = new Set(order.slice(0, (occurrence || 0) * 2));
       const fresh = order.filter((index) => !used.has(index));
       return fresh.slice(0, 2);
@@ -1185,9 +1188,13 @@
 
       const visits = timesPerWeek(days);
       const hangs = hangSessions(days);
+      const coverage = days === 1
+        ? "One exercise for each body part, and 2 for legs. "
+        : days === 2
+          ? "Two exercises for each body part, and 2 for legs. "
+          : "Each body part " + (visits === 1 ? "once" : "twice") + " this week. ";
       summary.textContent = personName() + " · " + days + (days === 1 ? " gym day. " : " gym days. ") +
-        "Each body part " + (visits === 1 ? "once" : "twice") + " this week. Fingerboard " +
-        (hangs === 1 ? "once." : "on 2 days.");
+        coverage + "Fingerboard " + (hangs === 1 ? "once." : "on 2 days.");
 
       if (weekOffset === 0) {
         const roll = document.createElement("button");
@@ -1464,7 +1471,7 @@
     }
 
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("sw.js?v=54").catch(() => {});
+      navigator.serviceWorker.register("sw.js?v=55").catch(() => {});
     }
   </script>
 </body>
