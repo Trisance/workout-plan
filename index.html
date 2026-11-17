@@ -618,7 +618,8 @@
         },
         scales: {},
         notes: {},
-        archive: []
+        archive: [],
+        finished: {}
       };
       try {
         const parsed = JSON.parse(localStorage.getItem("workout-plan-v1") || "null");
@@ -631,6 +632,7 @@
           scales: parsed.scales && typeof parsed.scales === "object" ? parsed.scales : {},
           notes: notesFrom(parsed.notes),
           archive: Array.isArray(parsed.archive) ? parsed.archive : [],
+          finished: finishedFrom(parsed.finished),
           plans: {
             you: normalizePlan(savedPlans.you, parsed.days),
             teja: normalizePlan(tejaPlan, null)
@@ -1103,6 +1105,7 @@
           doneBox.addEventListener("change", () => {
             if (doneBox.checked) plan().checks[doneKey] = true;
             else delete plan().checks[doneKey];
+            storeFinished(week, part, doneBox.checked);
             article.classList.toggle("is-done", doneBox.checked);
             save();
           });
@@ -1147,6 +1150,7 @@
                 const key = weightKey(week, liftKey, who);
                 if (input.value.trim()) state.weights[key] = input.value;
                 else delete state.weights[key];
+                if (plan().checks[doneKey]) storeFinished(week, part, true);
                 save();
               });
               label.append(caption, input);
@@ -1232,6 +1236,64 @@
       return person;
     }
 
+    function finishedFrom(saved) {
+      const source = saved && typeof saved === "object" && !Array.isArray(saved) ? saved : {};
+      const next = {};
+      Object.keys(source).forEach((key) => {
+        const item = source[key];
+        if (!item || typeof item !== "object" || !dateFromIso(item.date)) return;
+        if (item.person !== "you" && item.person !== "teja") return;
+        if (typeof item.name !== "string" || !item.name) return;
+        const exercises = Array.isArray(item.exercises) ? item.exercises.filter((exercise) => exercise && typeof exercise.name === "string").map((exercise) => {
+          const record = { name: exercise.name };
+          if (exercise.sets != null && exercise.sets !== "") record.sets = exercise.sets;
+          if (exercise.reps != null && exercise.reps !== "") record.reps = exercise.reps;
+          if (exercise.hold) record.hold = exercise.hold;
+          if (exercise.hangs) record.hangs = exercise.hangs;
+          if (exercise.weight) record.weight = String(exercise.weight).slice(0, 20);
+          return record;
+        }) : [];
+        next[key] = { date: item.date, person: item.person, name: item.name, exercises };
+      });
+      return next;
+    }
+
+    function finishedKey(phaseNumber, partId, occurrence) {
+      return state.person + "|" + phaseNumber + "|" + partId + "|" + occurrence;
+    }
+
+    function finishedExercise(exercise, part, phaseNumber) {
+      const current = exercise.current || {};
+      const record = { name: exercise.name };
+      if (current.sets != null) record.sets = current.sets;
+      if (current.reps != null) record.reps = current.reps;
+      if (current.hold) record.hold = current.hold;
+      if (current.hangs) record.hangs = current.hangs;
+      const hang = part.id === "fingerboard" || current.hangs;
+      if (!hang) {
+        const weight = state.weights[weightKey(phaseNumber, exercise.id + "#" + part.occurrence, state.person)] || "";
+        if (weight) record.weight = String(weight).slice(0, 20);
+      }
+      return record;
+    }
+
+    function storeFinished(phaseNumber, part, checked) {
+      if (!state.finished || typeof state.finished !== "object" || Array.isArray(state.finished)) state.finished = {};
+      const key = finishedKey(phaseNumber, part.id, part.occurrence);
+      if (!checked) {
+        delete state.finished[key];
+        return;
+      }
+      const existing = state.finished[key];
+      const today = new Date();
+      state.finished[key] = {
+        date: existing && existing.date ? existing.date : isoDate(today),
+        person: state.person,
+        name: part.name,
+        exercises: (part.exercises || []).map((exercise) => finishedExercise(exercise, part, phaseNumber))
+      };
+    }
+
     function historyWorkouts() {
       const byDate = new Map();
       state.archive.forEach((entry) => {
@@ -1253,9 +1315,23 @@
             date,
             day,
             range: entry.range || "",
-            scale: String(person.scale || "").trim()
+            scale: String(person.scale || "").trim(),
+            finished: []
           });
         });
+      });
+      Object.keys(state.finished || {}).forEach((key) => {
+        const item = state.finished[key];
+        if (!item || item.person !== state.person) return;
+        const date = dateFromIso(item.date);
+        if (!date) return;
+        const iso = isoDate(date);
+        const existing = byDate.get(iso);
+        if (existing) {
+          existing.finished.push(item);
+          return;
+        }
+        byDate.set(iso, { iso, date, finished: [item] });
       });
       return byDate;
     }
@@ -1273,6 +1349,25 @@
       }
       const title = document.createElement("h3");
       title.textContent = item.date.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
+      box.appendChild(title);
+      if (item.finished && item.finished.length) {
+        const meta = document.createElement("p");
+        meta.className = "last";
+        meta.textContent = "Finished";
+        box.appendChild(meta);
+        item.finished.forEach((part) => {
+          const heading = document.createElement("h3");
+          heading.textContent = part.name + " · done";
+          box.appendChild(heading);
+          (part.exercises || []).forEach((exercise) => {
+            const line = document.createElement("p");
+            line.className = "scheme";
+            line.textContent = effort(exercise);
+            box.appendChild(line);
+          });
+        });
+        return;
+      }
       const meta = document.createElement("p");
       meta.className = "last";
       meta.textContent = "Day " + item.day.day + (item.range ? " · Week of " + item.range : "");
@@ -1479,7 +1574,7 @@
     }
 
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("sw.js?v=56").catch(() => {});
+      navigator.serviceWorker.register("sw.js?v=57").catch(() => {});
     }
   </script>
 </body>
