@@ -241,6 +241,8 @@
 
     .page-tabs { margin-top: 16px; }
 
+    .week-card .week-toggle { margin-top: 0; }
+
     .week-link {
       width: 100%;
       margin-top: 10px;
@@ -464,10 +466,13 @@
     <p class="note" id="note">Tick Julian or Teja. Each person gets their own days, sets, and reps. Legs have their own day. Biceps and triceps share a day. Chest, shoulders, and back share the other days. Core and fingerboard can join any day. Save as previous week keeps the dates, scale weights, and what each person marked done.</p>
 
     <div id="planner">
+    <section class="controls week-card">
+      <div class="week-toggle" id="week-toggle"></div>
+    </section>
+
     <section class="controls">
       <h2>Days at the gym</h2>
       <div class="day-picker" id="day-picker"></div>
-      <div class="week-toggle" id="week-toggle"></div>
       <div class="names">
         <label class="pick"><input type="checkbox" id="pick-you"> Julian</label>
         <label class="pick"><input type="checkbox" id="pick-teja"> Teja</label>
@@ -1631,7 +1636,7 @@
     }
 
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("sw.js?v=58").catch(() => {});
+      navigator.serviceWorker.register("sw.js?v=59").catch(() => {});
     }
   </script>
 </body>
