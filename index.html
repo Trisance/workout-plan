@@ -461,7 +461,7 @@
       <button type="button" id="tab-history">Previous weeks</button>
     </div>
     <p class="week-of" id="week-of"></p>
-    <p class="note" id="note">Tick Julian or Teja. Each person gets their own days, sets, and reps. One gym day is one exercise per body part and two for legs. Two gym days are two exercises per body part and two for legs. Body parts move to different days each week. Save as previous week keeps the dates, scale weights, and what each person marked done.</p>
+    <p class="note" id="note">Tick Julian or Teja. Each person gets their own days, sets, and reps. One gym day is one exercise per body part and two for legs. Two gym days are two exercises per body part and two for legs. Three or four gym days train each body part once, with three exercises except biceps, triceps, and core. Five or six gym days train each body part twice, two exercises at 3 sets. Save as previous week keeps the dates, scale weights, and what each person marked done.</p>
 
     <div id="planner">
     <section class="controls">
@@ -766,12 +766,12 @@
       return count;
     }
 
-    function prescription(partIndex, slot, phase, person, occurrence) {
+    function prescription(partIndex, slot, phase, person, occurrence, dayCount) {
       const item = PARTS[partIndex].exercises[slot];
       const id = exerciseKey(partIndex, slot);
       const shift = person === "teja" ? 1 : 0;
       const visit = occurrence || 0;
-      const sets = [2, 3, 4][mod(id + phase + shift + visit * 2, 3)];
+      const sets = dayCount >= 5 ? 3 : [2, 3, 4][mod(id + phase + shift + visit * 2, 3)];
       if (item && item.reps) {
         const planned = {
           reps: item.reps[mod(id * 2 + phase + shift + visit, item.reps.length)],
@@ -802,6 +802,11 @@
       return items.slice(turn).concat(items.slice(0, turn));
     }
 
+    function exerciseCap(partId) {
+      if (partId === "biceps" || partId === "triceps" || partId === "core") return 2;
+      return 3;
+    }
+
     function shownExerciseSlots(phase, person, partIndex, occurrence, dayCount) {
       const count = PARTS[partIndex].exercises.length;
       if (!count) return [];
@@ -809,6 +814,8 @@
       const leg = PARTS[partIndex].id === "quads" || PARTS[partIndex].id === "hamstrings";
       if (dayCount === 1 || (dayCount === 2 && leg)) return order.slice(0, 1);
       if (dayCount === 2) return order.slice(0, Math.min(2, count));
+      if (dayCount === 3 || dayCount === 4) return order.slice(0, Math.min(exerciseCap(PARTS[partIndex].id), count));
+      if (dayCount >= 5) return [order[Math.min(occurrence || 0, count - 1)]];
       if (count <= 2) return Array.from({ length: count }, (_, index) => index);
       const used = new Set(order.slice(0, (occurrence || 0) * 2));
       const fresh = order.filter((index) => !used.has(index));
@@ -860,7 +867,7 @@
       const saved = savedExercises && (savedExercises[exerciseId + "#" + (occurrence || 0)] || savedExercises[exerciseId]);
       if (saved) return saved;
       if (exerciseId === "fingerboard") return hangPlan(plan().roll - 1, state.person, occurrence);
-      return prescription(partIndex, slot, plan().roll - 1, state.person, occurrence || 0);
+      return prescription(partIndex, slot, plan().roll - 1, state.person, occurrence || 0, plan().lastWeek && plan().lastWeek.days);
     }
 
     function scheme(item) {
@@ -946,7 +953,7 @@
                 const name = exerciseName(item);
                 const id = part.id + "-" + (exerciseSlot + 1);
                 const visit = trainingOccurrence(slot.partIndex, slot.occurrence);
-                const prescribed = prescription(slot.partIndex, exerciseSlot, currentPhase, person, visit);
+                const prescribed = prescription(slot.partIndex, exerciseSlot, currentPhase, person, visit, current.days);
                 const record = {
                   name,
                   reps: prescribed.reps,
@@ -1057,7 +1064,7 @@
               return {
                 id: part.id + "-" + (exerciseSlot + 1),
                 name: exerciseName(item),
-                current: prescription(slot.partIndex, exerciseSlot, week, state.person, visit),
+                current: prescription(slot.partIndex, exerciseSlot, week, state.person, visit, days),
                 previous: savedLast(part.id + "-" + (exerciseSlot + 1), slot.partIndex, exerciseSlot, visit)
               };
             })
@@ -1186,13 +1193,14 @@
         planList.appendChild(section);
       });
 
-      const visits = timesPerWeek(days);
       const hangs = hangSessions(days);
       const coverage = days === 1
         ? "One exercise for each body part, and 2 for legs. "
         : days === 2
           ? "Two exercises for each body part, and 2 for legs. "
-          : "Each body part " + (visits === 1 ? "once" : "twice") + " this week. ";
+          : days <= 4
+            ? "Each body part once. Three exercises, except two for biceps, triceps, and core. "
+            : "Each body part twice. Two exercises at 3 sets each. ";
       summary.textContent = personName() + " · " + days + (days === 1 ? " gym day. " : " gym days. ") +
         coverage + "Fingerboard " + (hangs === 1 ? "once." : "on 2 days.");
 
@@ -1471,7 +1479,7 @@
     }
 
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("sw.js?v=55").catch(() => {});
+      navigator.serviceWorker.register("sw.js?v=56").catch(() => {});
     }
   </script>
 </body>
