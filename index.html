@@ -461,7 +461,7 @@
       <button type="button" id="tab-history">Previous weeks</button>
     </div>
     <p class="week-of" id="week-of"></p>
-    <p class="note" id="note">Tick Julian or Teja. Each person gets their own days, sets, and reps. One gym day is one exercise per body part and two for legs. Two gym days are two exercises per body part and two for legs. Three or four gym days train each body part once, with three exercises except biceps, triceps, and core. Five or six gym days train each body part twice, two exercises at 3 sets. Save as previous week keeps the dates, scale weights, and what each person marked done.</p>
+    <p class="note" id="note">Tick Julian or Teja. Each person gets their own days, sets, and reps. Legs have their own day. Biceps and triceps share a day. Chest, shoulders, and back share the other days. Core and fingerboard can join any day. Save as previous week keeps the dates, scale weights, and what each person marked done.</p>
 
     <div id="planner">
     <section class="controls">
@@ -817,7 +817,11 @@
       if (dayCount === 1 || (dayCount === 2 && leg)) return order.slice(0, 1);
       if (dayCount === 2) return order.slice(0, Math.min(2, count));
       if (dayCount === 3 || dayCount === 4) return order.slice(0, Math.min(exerciseCap(PARTS[partIndex].id), count));
-      if (dayCount >= 5) return [order[Math.min(occurrence || 0, count - 1)]];
+      if (dayCount >= 5) {
+        const oneArmDay = dayCount === 5 && (PARTS[partIndex].id === "biceps" || PARTS[partIndex].id === "triceps");
+        if (oneArmDay) return order.slice(0, Math.min(2, count));
+        return [order[Math.min(occurrence || 0, count - 1)]];
+      }
       if (count <= 2) return Array.from({ length: count }, (_, index) => index);
       const used = new Set(order.slice(0, (occurrence || 0) * 2));
       const fresh = order.filter((index) => !used.has(index));
@@ -830,32 +834,85 @@
     }
 
     function weekBuckets(phase, person, dayCount) {
-      const copies = timesPerWeek(dayCount);
-      const buckets = Array.from({ length: dayCount }, (_, index) => ({ day: index + 1, parts: [] }));
-      const order = partOrder(phase, person);
-      for (let copy = 0; copy < copies; copy++) {
-        const sequence = copy === 0 ? order : order.slice(4).concat(order.slice(0, 4));
-        sequence.forEach((partIndex) => {
-          let best = -1;
-          buckets.forEach((bucket, index) => {
-            if (bucket.parts.some((slot) => slot.partIndex === partIndex)) return;
-            if (best === -1 || bucket.parts.length < buckets[best].parts.length) best = index;
-          });
-          if (best === -1) return;
-          buckets[best].parts.push({ partIndex, occurrence: copy });
-        });
+      const buckets = Array.from({ length: dayCount }, (_, index) => ({ day: index + 1, parts: [], group: "" }));
+      const indexOf = {};
+      PARTS.forEach((part, index) => { indexOf[part.id] = index; });
+      if (dayCount === 1) {
+        PARTS.forEach((_, partIndex) => buckets[0].parts.push({ partIndex, occurrence: 0 }));
+        buckets[0].parts.push({ fingerboard: true, occurrence: 0 });
+        return buckets;
       }
-      const days = buckets.map((_, index) => index);
-      let seed = mixSeed(phase + 19, person + "|hang") || 1;
-      for (let i = days.length - 1; i > 0; i--) {
+
+      const copies = timesPerWeek(dayCount);
+      const labels = [];
+      if (dayCount === 2) labels.push("legs", "mixed");
+      else if (dayCount === 5) labels.push("legs", "legs", "upper", "upper", "arms");
+      else {
+        for (let i = 0; i < copies; i++) labels.push("legs");
+        for (let i = 0; i < copies; i++) labels.push("arms");
+        while (labels.length < dayCount) labels.push("upper");
+      }
+
+      let seed = mixSeed(phase + 7, person + "|groups") || 1;
+      const order = labels.map((_, index) => index);
+      for (let i = order.length - 1; i > 0; i--) {
         seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
         const swap = seed % (i + 1);
-        const held = days[i];
-        days[i] = days[swap];
-        days[swap] = held;
+        const held = order[i];
+        order[i] = order[swap];
+        order[swap] = held;
       }
-      days.slice(0, hangSessions(dayCount)).forEach((dayIndex, occurrence) => {
-        buckets[dayIndex].parts.push({ fingerboard: true, occurrence });
+      order.forEach((bucketIndex, labelIndex) => {
+        buckets[bucketIndex].group = labels[labelIndex];
+      });
+
+      const homes = { legs: [], arms: [], upper: [], mixed: [] };
+      buckets.forEach((bucket, index) => {
+        if (homes[bucket.group]) homes[bucket.group].push(index);
+      });
+
+      function shuffled(items, salt) {
+        const copy = items.slice();
+        let local = mixSeed(phase + 13, person + "|" + salt) || 1;
+        for (let i = copy.length - 1; i > 0; i--) {
+          local = (Math.imul(local, 1664525) + 1013904223) >>> 0;
+          const swap = local % (i + 1);
+          const held = copy[i];
+          copy[i] = copy[swap];
+          copy[swap] = held;
+        }
+        return copy;
+      }
+
+      function place(groupName, partIndexes) {
+        const days = homes[groupName] || [];
+        if (!days.length) return;
+        shuffled(partIndexes, groupName).forEach((partIndex) => {
+          for (let copy = 0; copy < copies; copy++) {
+            let best = -1;
+            days.forEach((day) => {
+              if (buckets[day].parts.some((slot) => slot.partIndex === partIndex)) return;
+              if (best === -1 || buckets[day].parts.length < buckets[best].parts.length) best = day;
+            });
+            if (best === -1) return;
+            buckets[best].parts.push({ partIndex, occurrence: copy });
+          }
+        });
+      }
+
+      place("legs", [indexOf.quads, indexOf.hamstrings]);
+      if (dayCount === 2) place("mixed", [indexOf.chest, indexOf.back, indexOf.shoulders, indexOf.biceps, indexOf.triceps]);
+      else {
+        place("arms", [indexOf.biceps, indexOf.triceps]);
+        place("upper", [indexOf.chest, indexOf.back, indexOf.shoulders]);
+      }
+
+      const openDays = buckets.map((_, index) => index);
+      shuffled(openDays, "core").slice(0, Math.min(copies, openDays.length)).forEach((day, occurrence) => {
+        buckets[day].parts.push({ partIndex: indexOf.core, occurrence });
+      });
+      shuffled(openDays, "hang").slice(0, Math.min(hangSessions(dayCount), openDays.length)).forEach((day, occurrence) => {
+        buckets[day].parts.push({ fingerboard: true, occurrence });
       });
       return buckets;
     }
@@ -1574,7 +1631,7 @@
     }
 
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("sw.js?v=57").catch(() => {});
+      navigator.serviceWorker.register("sw.js?v=58").catch(() => {});
     }
   </script>
 </body>
