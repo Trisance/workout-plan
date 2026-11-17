@@ -84,9 +84,25 @@
 
     .day-picker { grid-template-columns: repeat(6, 1fr); }
 
+    .focus-picker {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 4px;
+      margin-top: 10px;
+    }
+
+    .focus-picker > * { min-width: 0; }
+
+    .focus-picker button {
+      padding: 4px 0;
+      font-size: 11px;
+      line-height: 1.15;
+      white-space: normal;
+    }
+
     .week-toggle, .names, .page-tabs { grid-template-columns: 1fr 1fr; }
 
-    .day-picker button, .week-toggle button, .page-tabs button, .week-link {
+    .day-picker button, .week-toggle button, .page-tabs button, .week-link, .focus-picker button {
       border: 1px solid var(--line);
       background: #fff;
       border-radius: 10px;
@@ -96,7 +112,8 @@
 
     .day-picker button[aria-pressed="true"],
     .week-toggle button[aria-pressed="true"],
-    .page-tabs button[aria-pressed="true"] {
+    .page-tabs button[aria-pressed="true"],
+    .focus-picker button[aria-pressed="true"] {
       background: var(--accent);
       border-color: var(--accent);
       color: var(--accent-ink);
@@ -473,6 +490,7 @@
     <section class="controls">
       <h2>Days at the gym</h2>
       <div class="day-picker" id="day-picker"></div>
+      <div class="focus-picker" id="focus-picker"></div>
       <div class="names">
         <label class="pick"><input type="checkbox" id="pick-you"> Julian</label>
         <label class="pick"><input type="checkbox" id="pick-teja"> Teja</label>
@@ -570,6 +588,32 @@
       dayPicker.appendChild(button);
     }
 
+    const focusPicker = document.getElementById("focus-picker");
+    [
+      ["chest", "Chest"],
+      ["back", "Back"],
+      ["legs", "Legs"],
+      ["arms", "Arms"],
+      ["shoulders", "Shoulder"]
+    ].forEach(([id, label]) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = label;
+      button.dataset.focus = id;
+      button.setAttribute("aria-label", "Focus " + label);
+      button.addEventListener("click", () => {
+        const key = state.person + "|" + phase();
+        const current = focusSelection(state.person, phase());
+        current[id] = !current[id];
+        if (!state.focus || typeof state.focus !== "object" || Array.isArray(state.focus)) state.focus = {};
+        if (["chest", "back", "legs", "arms", "shoulders"].some((name) => current[name])) state.focus[key] = current;
+        else delete state.focus[key];
+        save();
+        render();
+      });
+      focusPicker.appendChild(button);
+    });
+
     ["This week", "Next week"].forEach((label, offset) => {
       const button = document.createElement("button");
       button.type = "button";
@@ -624,7 +668,8 @@
         scales: {},
         notes: {},
         archive: [],
-        finished: {}
+        finished: {},
+        focus: {}
       };
       try {
         const parsed = JSON.parse(localStorage.getItem("workout-plan-v1") || "null");
@@ -638,6 +683,7 @@
           notes: notesFrom(parsed.notes),
           archive: Array.isArray(parsed.archive) ? parsed.archive : [],
           finished: finishedFrom(parsed.finished),
+          focus: focusFrom(parsed.focus),
           plans: {
             you: normalizePlan(savedPlans.you, parsed.days),
             teja: normalizePlan(tejaPlan, null)
@@ -814,10 +860,22 @@
       return 3;
     }
 
-    function shownExerciseSlots(phase, person, partIndex, occurrence, dayCount) {
+    function shownExerciseSlots(phase, person, partIndex, occurrence, dayCount, visitSize) {
       const count = PARTS[partIndex].exercises.length;
       if (!count) return [];
       const order = rotatedExerciseSlots(phase, person, partIndex);
+      if (visitSize) {
+        const slots = [];
+        const seen = new Set();
+        const size = Math.min(visitSize, count);
+        for (let step = 0; slots.length < size && step < count; step++) {
+          const slot = order[mod((occurrence || 0) + step, count)];
+          if (seen.has(slot)) break;
+          seen.add(slot);
+          slots.push(slot);
+        }
+        return slots;
+      }
       const leg = PARTS[partIndex].id === "quads" || PARTS[partIndex].id === "hamstrings";
       if (dayCount === 1 || (dayCount === 2 && leg)) return order.slice(0, 1);
       if (dayCount === 2) return order.slice(0, Math.min(2, count));
@@ -838,10 +896,161 @@
       return 0;
     }
 
+    function focusFrom(saved) {
+      const source = saved && typeof saved === "object" && !Array.isArray(saved) ? saved : {};
+      const next = {};
+      Object.keys(source).forEach((key) => {
+        const item = source[key];
+        if (!item || typeof item !== "object") return;
+        const focus = {};
+        ["chest", "back", "legs", "arms", "shoulders"].forEach((name) => {
+          if (item[name]) focus[name] = true;
+        });
+        if (Object.keys(focus).length) next[key] = focus;
+      });
+      return next;
+    }
+
+    function focusSelection(person, phaseNumber) {
+      const saved = state.focus && state.focus[person + "|" + phaseNumber];
+      const focus = { chest: false, back: false, legs: false, arms: false, shoulders: false };
+      if (saved && typeof saved === "object") {
+        Object.keys(focus).forEach((name) => { focus[name] = !!saved[name]; });
+      }
+      return focus;
+    }
+
+    function focusActive(person, phaseNumber) {
+      const focus = focusSelection(person, phaseNumber);
+      return Object.keys(focus).some((name) => focus[name]);
+    }
+
+    function visitSizeFor(dayCount, partIndex, groupDayCount) {
+      const count = PARTS[partIndex].exercises.length;
+      const id = PARTS[partIndex].id;
+      const leg = id === "quads" || id === "hamstrings";
+      if (!count) return 0;
+      if (dayCount === 1 || (dayCount === 2 && leg)) return 1;
+      if (dayCount === 2) return Math.min(2, count);
+      if (dayCount <= 4) return Math.min(exerciseCap(id), count);
+      return Math.min(groupDayCount <= 1 ? 2 : 1, count);
+    }
+
+    function focusedBuckets(phase, person, dayCount, indexOf) {
+      const buckets = Array.from({ length: dayCount }, (_, index) => ({ day: index + 1, parts: [], group: "" }));
+      const focus = focusSelection(person, phase);
+      const groups = [];
+      if (focus.legs) groups.push("legs");
+      if (focus.arms) groups.push("arms");
+      if (focus.chest || focus.back || focus.shoulders) groups.push("upper");
+
+      function shuffled(items, salt) {
+        const copy = items.slice();
+        let local = mixSeed(phase + 13, person + "|" + salt) || 1;
+        for (let i = copy.length - 1; i > 0; i--) {
+          local = (Math.imul(local, 1664525) + 1013904223) >>> 0;
+          const swap = local % (i + 1);
+          const held = copy[i];
+          copy[i] = copy[swap];
+          copy[swap] = held;
+        }
+        return copy;
+      }
+
+      let labels;
+      if (dayCount === 1) labels = ["all"];
+      else if (groups.length === 1) labels = Array.from({ length: dayCount }, () => groups[0]);
+      else if (dayCount === 2 && groups.includes("legs")) labels = ["legs", "mixed"];
+      else {
+        const priority = shuffled(groups, "priority");
+        const counts = {};
+        priority.forEach((group) => { counts[group] = 0; });
+        labels = [];
+        for (let i = 0; i < dayCount; i++) {
+          let best = priority[0];
+          priority.forEach((group) => {
+            if (counts[group] < counts[best]) best = group;
+          });
+          labels.push(best);
+          counts[best] += 1;
+        }
+      }
+
+      let seed = mixSeed(phase + 7, person + "|groups") || 1;
+      const order = labels.map((_, index) => index);
+      for (let i = order.length - 1; i > 0; i--) {
+        seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+        const swap = seed % (i + 1);
+        const held = order[i];
+        order[i] = order[swap];
+        order[swap] = held;
+      }
+      order.forEach((bucketIndex, labelIndex) => {
+        buckets[bucketIndex].group = labels[labelIndex];
+      });
+
+      const homes = { legs: [], arms: [], upper: [], mixed: [], all: [] };
+      buckets.forEach((bucket, index) => {
+        if (homes[bucket.group]) homes[bucket.group].push(index);
+      });
+
+      function place(groupName, partIndexes) {
+        const days = homes[groupName] || [];
+        days.forEach((day, occurrence) => {
+          shuffled(partIndexes, groupName + occurrence).forEach((partIndex) => {
+            buckets[day].parts.push({
+              partIndex,
+              occurrence,
+              visitSize: visitSizeFor(dayCount, partIndex, days.length)
+            });
+          });
+        });
+      }
+
+      const upper = [];
+      if (focus.chest) upper.push(indexOf.chest);
+      if (focus.back) upper.push(indexOf.back);
+      if (focus.shoulders) upper.push(indexOf.shoulders);
+      if (dayCount === 1) {
+        const parts = [];
+        if (focus.chest) parts.push(indexOf.chest);
+        if (focus.back) parts.push(indexOf.back);
+        if (focus.shoulders) parts.push(indexOf.shoulders);
+        if (focus.arms) parts.push(indexOf.biceps, indexOf.triceps);
+        if (focus.legs) parts.push(indexOf.quads, indexOf.hamstrings);
+        place("all", parts);
+      } else if (dayCount === 2 && groups.includes("legs") && groups.length > 1) {
+        place("legs", [indexOf.quads, indexOf.hamstrings]);
+        const mixed = [];
+        if (focus.arms) mixed.push(indexOf.biceps, indexOf.triceps);
+        mixed.push(...upper);
+        place("mixed", mixed);
+      } else {
+        if (focus.legs) place("legs", [indexOf.quads, indexOf.hamstrings]);
+        if (focus.arms) place("arms", [indexOf.biceps, indexOf.triceps]);
+        if (upper.length) place("upper", upper);
+      }
+
+      const openDays = buckets.map((_, index) => index);
+      const copies = timesPerWeek(dayCount);
+      shuffled(openDays, "core").slice(0, Math.min(copies, openDays.length)).forEach((day, occurrence) => {
+        buckets[day].parts.push({
+          partIndex: indexOf.core,
+          occurrence,
+          visitSize: visitSizeFor(dayCount, indexOf.core, copies)
+        });
+      });
+      shuffled(openDays, "hang").slice(0, Math.min(hangSessions(dayCount), openDays.length)).forEach((day, occurrence) => {
+        buckets[day].parts.push({ fingerboard: true, occurrence });
+      });
+      return buckets;
+    }
+
     function weekBuckets(phase, person, dayCount) {
       const buckets = Array.from({ length: dayCount }, (_, index) => ({ day: index + 1, parts: [], group: "" }));
       const indexOf = {};
       PARTS.forEach((part, index) => { indexOf[part.id] = index; });
+      if (focusActive(person, phase)) return focusedBuckets(phase, person, dayCount, indexOf);
       if (dayCount === 1) {
         PARTS.forEach((_, partIndex) => buckets[0].parts.push({ partIndex, occurrence: 0 }));
         buckets[0].parts.push({ fingerboard: true, occurrence: 0 });
@@ -1012,7 +1221,7 @@
             return {
               name: part.name,
               done: !!(done[visitKey] || (slot.occurrence === 0 && done[part.id])),
-              exercises: shownExerciseSlots(currentPhase, person, slot.partIndex, slot.occurrence, current.days).map((exerciseSlot) => {
+              exercises: shownExerciseSlots(currentPhase, person, slot.partIndex, slot.occurrence, current.days, slot.visitSize).map((exerciseSlot) => {
                 const item = part.exercises[exerciseSlot];
                 const name = exerciseName(item);
                 const id = part.id + "-" + (exerciseSlot + 1);
@@ -1090,6 +1299,10 @@
       [...dayPicker.children].forEach((button, index) => {
         button.setAttribute("aria-pressed", String(index + 1 === days));
       });
+      const focus = focusSelection(state.person, week);
+      [...focusPicker.children].forEach((button) => {
+        button.setAttribute("aria-pressed", String(!!focus[button.dataset.focus]));
+      });
       [...weekToggle.children].forEach((button, index) => {
         button.setAttribute("aria-pressed", String(index === weekOffset));
       });
@@ -1122,7 +1335,7 @@
             id: part.id,
             name: part.name,
             occurrence: slot.occurrence,
-            exercises: shownExerciseSlots(week, state.person, slot.partIndex, slot.occurrence, days).map((exerciseSlot) => {
+            exercises: shownExerciseSlots(week, state.person, slot.partIndex, slot.occurrence, days, slot.visitSize).map((exerciseSlot) => {
               const item = part.exercises[exerciseSlot];
               const visit = trainingOccurrence(slot.partIndex, slot.occurrence);
               return {
@@ -1260,13 +1473,17 @@
       });
 
       const hangs = hangSessions(days);
-      const coverage = days === 1
-        ? "One exercise for each body part, and 2 for legs. "
-        : days === 2
-          ? "Two exercises for each body part, and 2 for legs. "
-          : days <= 4
-            ? "Each body part once. Three exercises, except two for biceps, triceps, and core. "
-            : "Each body part twice. Two exercises at 3 sets each. ";
+      const focused = focusActive(state.person, week);
+      const focusNames = ["chest", "back", "legs", "arms", "shoulders"].filter((name) => focus[name]);
+      const coverage = focused
+        ? "Focused on " + focusNames.join(", ") + ". "
+        : days === 1
+          ? "One exercise for each body part, and 2 for legs. "
+          : days === 2
+            ? "Two exercises for each body part, and 2 for legs. "
+            : days <= 4
+              ? "Each body part once. Three exercises, except two for biceps, triceps, and core. "
+              : "Each body part twice. Two exercises at 3 sets each. ";
       summary.textContent = personName() + " · " + days + (days === 1 ? " gym day. " : " gym days. ") +
         coverage + "Fingerboard " + (hangs === 1 ? "once." : "on 2 days.");
 
@@ -1636,7 +1853,7 @@
     }
 
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("sw.js?v=59").catch(() => {});
+      navigator.serviceWorker.register("sw.js?v=60").catch(() => {});
     }
   </script>
 </body>
