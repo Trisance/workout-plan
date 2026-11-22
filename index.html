@@ -66,6 +66,23 @@
       box-shadow: var(--shadow);
     }
 
+    .week-done-day {
+      margin-top: 12px;
+      padding-top: 10px;
+      border-top: 1px solid var(--line);
+    }
+
+    .week-done-day h3 {
+      margin: 0 0 4px;
+      font-size: 15px;
+      letter-spacing: 0;
+      text-transform: none;
+    }
+
+    .week-done-day .scheme { margin: 0; }
+
+    .week-done-day p { overflow-wrap: anywhere; }
+
     .controls h2, .day h2, .part h3 {
       margin: 0;
       font-size: 13px;
@@ -508,6 +525,8 @@
         </label>
       </div>
     </section>
+
+    <section class="controls" id="week-done"></section>
 
     <p class="summary" id="summary"></p>
     <div id="plan"></div>
@@ -1488,6 +1507,85 @@
       render();
     }
 
+    function weekDates(offset) {
+      const start = weekStart(offset);
+      return Array.from({ length: 7 }, (_, index) => new Date(start.getFullYear(), start.getMonth(), start.getDate() + index));
+    }
+
+    function finishedInWeek(person, offset) {
+      const dates = weekDates(offset);
+      const start = isoDate(dates[0]);
+      const end = isoDate(dates[6]);
+      const items = [];
+      Object.keys(state.finished || {}).forEach((key) => {
+        const item = state.finished[key];
+        if (!item || item.person !== person) return;
+        if (item.date < start || item.date > end) return;
+        items.push(Object.assign({ key }, item));
+      });
+      return items;
+    }
+
+    function restoreFinishedWeek(person, phaseNumber, offset) {
+      const planFor = state.plans[person];
+      if (!planFor.checks || typeof planFor.checks !== "object") planFor.checks = {};
+      finishedInWeek(person, offset).forEach((item) => {
+        const bits = String(item.key).split("|");
+        if (bits.length < 4 || bits[0] !== person || String(bits[1]) !== String(phaseNumber)) return;
+        planFor.checks[phaseNumber + "|" + bits[2] + "|" + bits[3]] = true;
+      });
+    }
+
+    function finishedWeight(person, phaseNumber, partId, occurrence, exerciseName) {
+      const item = state.finished && state.finished[person + "|" + phaseNumber + "|" + partId + "|" + occurrence];
+      if (!item || item.person !== person) return "";
+      const dates = weekDates(weekOffset);
+      if (item.date < isoDate(dates[0]) || item.date > isoDate(dates[6])) return "";
+      const match = (item.exercises || []).find((exercise) => exercise && exercise.name === exerciseName && exercise.weight);
+      return match ? String(match.weight) : "";
+    }
+
+    function renderWeekDone() {
+      const box = document.getElementById("week-done");
+      box.replaceChildren();
+      const heading = document.createElement("h2");
+      heading.textContent = personName() + " · Sunday to Saturday";
+      box.appendChild(heading);
+      const byDate = new Map();
+      finishedInWeek(state.person, weekOffset).forEach((item) => {
+        if (!byDate.has(item.date)) byDate.set(item.date, []);
+        byDate.get(item.date).push(item);
+      });
+      weekDates(weekOffset).forEach((date) => {
+        const row = document.createElement("div");
+        row.className = "week-done-day";
+        const title = document.createElement("h3");
+        title.textContent = date.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
+        row.appendChild(title);
+        const items = byDate.get(isoDate(date)) || [];
+        if (!items.length) {
+          const empty = document.createElement("p");
+          empty.className = "last";
+          empty.textContent = "Nothing marked done";
+          row.appendChild(empty);
+        } else {
+          items.forEach((part) => {
+            const name = document.createElement("p");
+            name.className = "scheme";
+            name.textContent = part.name;
+            row.appendChild(name);
+            (part.exercises || []).forEach((exercise) => {
+              const line = document.createElement("p");
+              line.className = "last";
+              line.textContent = effort(exercise);
+              row.appendChild(line);
+            });
+          });
+        }
+        box.appendChild(row);
+      });
+    }
+
     function render() {
       tabPlan.setAttribute("aria-pressed", String(screen === "plan"));
       tabHistory.setAttribute("aria-pressed", String(screen !== "plan"));
@@ -1502,6 +1600,8 @@
       }
 
       const week = phase();
+      restoreFinishedWeek(state.person, week, weekOffset);
+      renderWeekDone();
       document.getElementById("title").textContent = weekOffset === 0 ? "This week" : "Next week";
       if (document.activeElement !== scaleYou) scaleYou.value = state.scales[scaleKey("you")] || "";
       if (document.activeElement !== scaleTeja) scaleTeja.value = state.scales[scaleKey("teja")] || "";
@@ -1607,6 +1707,7 @@
             storeFinished(week, part, doneBox.checked);
             article.classList.toggle("is-done", doneBox.checked);
             save();
+            render();
           });
           doneLabel.append(doneBox, doneText);
           head.append(title, doneLabel);
@@ -1644,7 +1745,12 @@
               input.placeholder = "Weight";
               const who = state.person;
               const liftKey = exercise.id + "#" + part.occurrence;
-              input.value = state.weights[weightKey(week, liftKey, who)] || "";
+              const weightId = weightKey(week, liftKey, who);
+              if (!state.weights[weightId]) {
+                const remembered = finishedWeight(who, week, part.id, part.occurrence, exercise.name);
+                if (remembered) state.weights[weightId] = remembered;
+              }
+              input.value = state.weights[weightId] || "";
               input.addEventListener("input", () => {
                 const key = weightKey(week, liftKey, who);
                 if (input.value.trim()) {
@@ -1658,6 +1764,7 @@
                 }
                 if (plan().checks[doneKey]) storeFinished(week, part, true);
                 save();
+                if (plan().checks[doneKey]) renderWeekDone();
               });
               label.append(caption, input);
               weights.appendChild(label);
@@ -2088,7 +2195,7 @@
     }
 
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("sw.js?v=64").catch(() => {});
+      navigator.serviceWorker.register("sw.js?v=65").catch(() => {});
     }
   </script>
 </body>
