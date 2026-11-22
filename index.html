@@ -559,6 +559,12 @@
       return turned;
     }
 
+    let loadFailed = false;
+    const droppedFinished = new Set();
+    const droppedWeights = new Set();
+    const droppedChecks = new Set();
+    const droppedNotes = new Set();
+
     const state = load();
     let weekOffset = 0;
 
@@ -575,6 +581,8 @@
     let historyMonth = null;
     let selectedHistoryDate = "";
     forgetStoredName();
+    writeDoneLog(state.finished);
+    window.addEventListener("pagehide", () => save());
 
     for (let day = 1; day <= 6; day++) {
       const button = document.createElement("button");
@@ -670,7 +678,8 @@
         notes: {},
         archive: [],
         finished: {},
-        focus: {}
+        focus: {},
+        weightTimes: {}
       };
       try {
         const parsed = JSON.parse(localStorage.getItem("workout-plan-v1") || "null");
@@ -680,10 +689,11 @@
         return {
           person: parsed.person === "teja" || parsed.person === "friend" ? "teja" : "you",
           weights: migrateWeights(parsed.weights),
+          weightTimes: timesFrom(parsed.weightTimes),
           scales: parsed.scales && typeof parsed.scales === "object" ? parsed.scales : {},
           notes: notesFrom(parsed.notes),
           archive: Array.isArray(parsed.archive) ? parsed.archive : [],
-          finished: finishedFrom(parsed.finished),
+          finished: mergeFinished(finishedFrom(parsed.finished), readDoneLog()),
           focus: focusFrom(parsed.focus),
           plans: {
             you: normalizePlan(savedPlans.you, parsed.days),
@@ -691,7 +701,8 @@
           }
         };
       } catch (error) {
-        return fallback;
+        loadFailed = true;
+        return Object.assign(fallback, { finished: readDoneLog() });
       }
     }
 
@@ -744,7 +755,106 @@
     }
 
     function save() {
-      localStorage.setItem("workout-plan-v1", JSON.stringify(state));
+      if (loadFailed) {
+        writeDoneLog(mergeFinished(readDoneLog(), state.finished, droppedFinished));
+        return;
+      }
+      try {
+        const disk = JSON.parse(localStorage.getItem("workout-plan-v1") || "null");
+        if (disk && typeof disk === "object") absorbStored(disk);
+      } catch (error) {}
+      state.finished = mergeFinished(state.finished, readDoneLog(), droppedFinished);
+      try {
+        localStorage.setItem("workout-plan-v1", JSON.stringify(state));
+      } catch (error) {}
+      writeDoneLog(state.finished);
+    }
+
+    function timesFrom(saved) {
+      const source = saved && typeof saved === "object" && !Array.isArray(saved) ? saved : {};
+      const next = {};
+      Object.keys(source).forEach((key) => {
+        const time = Number(source[key]);
+        if (time > 0) next[key] = time;
+      });
+      return next;
+    }
+
+    function readDoneLog() {
+      try {
+        return finishedFrom(JSON.parse(localStorage.getItem("workout-plan-done-v1") || "null"));
+      } catch (error) {
+        return {};
+      }
+    }
+
+    function writeDoneLog(finished) {
+      try {
+        localStorage.setItem("workout-plan-done-v1", JSON.stringify(finished || {}));
+      } catch (error) {}
+    }
+
+    function mergeFinished(base, extra, dropped) {
+      const merged = Object.assign({}, base || {}, extra || {});
+      Object.keys(merged).forEach((key) => {
+        const left = base && base[key];
+        const right = extra && extra[key];
+        if (left && right && (Number(left.savedAt) || 0) > (Number(right.savedAt) || 0)) merged[key] = left;
+      });
+      if (dropped) dropped.forEach((key) => delete merged[key]);
+      return merged;
+    }
+
+    function mergeArchive(diskArchive, memoryArchive) {
+      const map = new Map();
+      (Array.isArray(diskArchive) ? diskArchive : []).forEach((entry) => {
+        if (entry && entry.id != null) map.set(entry.id, entry);
+      });
+      (memoryArchive || []).forEach((entry) => {
+        if (entry && entry.id != null) map.set(entry.id, entry);
+      });
+      return [...map.values()].sort((a, b) => b.id - a.id);
+    }
+
+    function absorbStored(disk) {
+      const diskWeights = migrateWeights(disk.weights);
+      const diskTimes = timesFrom(disk.weightTimes);
+      if (!state.weightTimes || typeof state.weightTimes !== "object") state.weightTimes = {};
+      Object.keys(diskWeights).forEach((key) => {
+        if (droppedWeights.has(key)) return;
+        const diskTime = diskTimes[key] || 0;
+        const memTime = state.weightTimes[key] || 0;
+        if (state.weights[key] == null || diskTime > memTime) {
+          state.weights[key] = diskWeights[key];
+          if (diskTime) state.weightTimes[key] = diskTime;
+        }
+      });
+      droppedWeights.forEach((key) => {
+        delete state.weights[key];
+        delete state.weightTimes[key];
+      });
+      state.finished = mergeFinished(mergeFinished(finishedFrom(disk.finished), readDoneLog()), state.finished, droppedFinished);
+      state.archive = mergeArchive(disk.archive, state.archive);
+      const diskNotes = notesFrom(disk.notes);
+      Object.keys(diskNotes).forEach((key) => {
+        if (!state.notes[key] && !droppedNotes.has(key)) state.notes[key] = diskNotes[key];
+      });
+      ["you", "teja"].forEach((person) => {
+        const savedPlans = disk.plans && typeof disk.plans === "object" ? disk.plans : {};
+        const diskPlan = savedPlans[person] || (person === "teja" ? savedPlans.friend : null);
+        const mem = state.plans[person];
+        if (!diskPlan || !mem) return;
+        const diskDays = Number(diskPlan.days);
+        if (mem.days == null && diskDays >= 1 && diskDays <= 6) mem.days = diskDays;
+        const diskChecks = diskPlan.checks && typeof diskPlan.checks === "object" ? diskPlan.checks : {};
+        Object.keys(diskChecks).forEach((key) => {
+          if (!mem.checks[key] && !droppedChecks.has(person + "|" + key) && diskChecks[key]) mem.checks[key] = true;
+        });
+        const diskRoll = Number(diskPlan.roll) || 0;
+        if (diskRoll > (Number(mem.roll) || 0) && diskPlan.lastWeek) mem.lastWeek = diskPlan.lastWeek;
+        else if (!mem.lastWeek && diskPlan.lastWeek) mem.lastWeek = diskPlan.lastWeek;
+        if (diskRoll > (Number(mem.roll) || 0)) mem.roll = diskRoll;
+      });
     }
 
     function weekStart(offset) {
@@ -1289,7 +1399,10 @@
       const text = String(value || "").slice(0, 500);
       const key = noteKey(phaseNumber, dayNumber, person);
       if (text) state.notes[key] = text;
-      else delete state.notes[key];
+      else {
+        delete state.notes[key];
+        droppedNotes.add(key);
+      }
       return text;
     }
 
@@ -1484,8 +1597,13 @@
           const doneText = document.createElement("span");
           doneText.textContent = "Done";
           doneBox.addEventListener("change", () => {
-            if (doneBox.checked) plan().checks[doneKey] = true;
-            else delete plan().checks[doneKey];
+            if (doneBox.checked) {
+              plan().checks[doneKey] = true;
+              droppedChecks.delete(state.person + "|" + doneKey);
+            } else {
+              delete plan().checks[doneKey];
+              droppedChecks.add(state.person + "|" + doneKey);
+            }
             storeFinished(week, part, doneBox.checked);
             article.classList.toggle("is-done", doneBox.checked);
             save();
@@ -1529,8 +1647,15 @@
               input.value = state.weights[weightKey(week, liftKey, who)] || "";
               input.addEventListener("input", () => {
                 const key = weightKey(week, liftKey, who);
-                if (input.value.trim()) state.weights[key] = input.value;
-                else delete state.weights[key];
+                if (input.value.trim()) {
+                  state.weights[key] = input.value;
+                  state.weightTimes[key] = Date.now();
+                  droppedWeights.delete(key);
+                } else {
+                  delete state.weights[key];
+                  delete state.weightTimes[key];
+                  droppedWeights.add(key);
+                }
                 if (plan().checks[doneKey]) storeFinished(week, part, true);
                 save();
               });
@@ -1639,6 +1764,7 @@
           return record;
         }) : [];
         next[key] = { date: item.date, person: item.person, name: item.name, exercises };
+        if (Number(item.savedAt) > 0) next[key].savedAt = Number(item.savedAt);
       });
       return next;
     }
@@ -1667,14 +1793,17 @@
       const key = finishedKey(phaseNumber, part.id, part.occurrence);
       if (!checked) {
         delete state.finished[key];
+        droppedFinished.add(key);
         return;
       }
+      droppedFinished.delete(key);
       const existing = state.finished[key];
       const today = new Date();
       state.finished[key] = {
         date: existing && existing.date ? existing.date : isoDate(today),
         person: state.person,
         name: part.name,
+        savedAt: Date.now(),
         exercises: (part.exercises || []).map((exercise) => finishedExercise(exercise, part, phaseNumber))
       };
     }
@@ -1959,7 +2088,7 @@
     }
 
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("sw.js?v=63").catch(() => {});
+      navigator.serviceWorker.register("sw.js?v=64").catch(() => {});
     }
   </script>
 </body>
