@@ -658,6 +658,7 @@
     function selectPerson(person) {
       if (syncingPerson) return;
       state.person = person;
+      weekOffset = 0;
       save();
       render();
     }
@@ -1526,20 +1527,32 @@
       return items;
     }
 
-    function restoreFinishedWeek(person, phaseNumber, offset) {
+    function restoreFinishedWeek(person, phaseNumber) {
+      if (weekOffset !== 0) return;
       const planFor = state.plans[person];
       if (!planFor.checks || typeof planFor.checks !== "object") planFor.checks = {};
-      finishedInWeek(person, offset).forEach((item) => {
+      const prefix = String(phaseNumber) + "|";
+      const keep = new Set();
+      finishedInWeek(person, 0).forEach((item) => {
         const bits = String(item.key).split("|");
         if (bits.length < 4 || bits[0] !== person || String(bits[1]) !== String(phaseNumber)) return;
-        planFor.checks[phaseNumber + "|" + bits[2] + "|" + bits[3]] = true;
+        const doneKey = phaseNumber + "|" + bits[2] + "|" + bits[3];
+        planFor.checks[doneKey] = true;
+        droppedChecks.delete(person + "|" + doneKey);
+        keep.add(doneKey);
+      });
+      Object.keys(planFor.checks).forEach((key) => {
+        if (key.indexOf(prefix) !== 0 || keep.has(key)) return;
+        delete planFor.checks[key];
+        droppedChecks.add(person + "|" + key);
       });
     }
 
     function finishedWeight(person, phaseNumber, partId, occurrence, exerciseName) {
+      if (weekOffset !== 0) return "";
       const item = state.finished && state.finished[person + "|" + phaseNumber + "|" + partId + "|" + occurrence];
       if (!item || item.person !== person) return "";
-      const dates = weekDates(weekOffset);
+      const dates = weekDates(0);
       if (item.date < isoDate(dates[0]) || item.date > isoDate(dates[6])) return "";
       const match = (item.exercises || []).find((exercise) => exercise && exercise.name === exerciseName && exercise.weight);
       return match ? String(match.weight) : "";
@@ -1547,16 +1560,22 @@
 
     function renderWeekDone() {
       const box = document.getElementById("week-done");
+      if (weekOffset !== 0) {
+        box.hidden = true;
+        box.replaceChildren();
+        return;
+      }
+      box.hidden = false;
       box.replaceChildren();
       const heading = document.createElement("h2");
-      heading.textContent = personName() + " · Sunday to Saturday";
+      heading.textContent = personName() + " · this week";
       box.appendChild(heading);
       const byDate = new Map();
-      finishedInWeek(state.person, weekOffset).forEach((item) => {
+      finishedInWeek(state.person, 0).forEach((item) => {
         if (!byDate.has(item.date)) byDate.set(item.date, []);
         byDate.get(item.date).push(item);
       });
-      weekDates(weekOffset).forEach((date) => {
+      weekDates(0).forEach((date) => {
         const row = document.createElement("div");
         row.className = "week-done-day";
         const title = document.createElement("h3");
@@ -1600,7 +1619,7 @@
       }
 
       const week = phase();
-      restoreFinishedWeek(state.person, week, weekOffset);
+      restoreFinishedWeek(state.person, week);
       renderWeekDone();
       document.getElementById("title").textContent = weekOffset === 0 ? "This week" : "Next week";
       if (document.activeElement !== scaleYou) scaleYou.value = state.scales[scaleKey("you")] || "";
@@ -2195,7 +2214,7 @@
     }
 
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("sw.js?v=65").catch(() => {});
+      navigator.serviceWorker.register("sw.js?v=66").catch(() => {});
     }
   </script>
 </body>
